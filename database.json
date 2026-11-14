@@ -1,0 +1,153 @@
+{
+  "users": [
+    {
+      "_id": "local_admin_1",
+      "id": "local_admin_1",
+      "name": "Admin",
+      "email": "admin@admin.com",
+      "passwordHash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+      "avatar": "/avatars/p1.jpg",
+      "authProvider": "email",
+      "createdAt": "2026-11-14T20:02:29.192Z"
+    },
+    {
+      "_id": "user_1794686694412",
+      "id": "user_1794686694412",
+      "name": "Ytpr621",
+      "email": "ytpr621@gmail.com",
+      "passwordHash": "6a1a29c47bb682156b21af85b82968f6c5ef56133d4d26c0afbfdacd7cd4812e",
+      "avatar": "/avatars/p2.jpg",
+      "authProvider": "brevo_email_otp_verified",
+      "createdAt": "2026-11-14T20:04:54.412Z"
+    },
+    {
+      "_id": "user_1794686931501",
+      "id": "user_1794686931501",
+      "name": "Fixerror",
+      "email": "fixerror276@gmail.com",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "avatar": "/avatars/p3.jpg",
+      "authProvider": "google_verified_password_set",
+      "createdAt": "2026-11-14T20:08:51.501Z"
+    }
+  ],
+  "playlists": {},
+  "likes": {
+    "guest": [],
+    "user_1794686694412": [],
+    "user_1794686931501": [
+      {
+        "rank": 1,
+        "id": "yt_ufCaQrNCUC4",
+        "streamUrl": "https://aac.saavncdn.com/089/64beffa430e4c948223ec6bfcc3a13f0_320.mp4",
+        "name": "Winning Speech",
+        "artist": "Karan Aujla",
+        "album": "Four Me EP",
+        "duration": 215,
+        "url": "/api/yt/stream?id=ufCaQrNCUC4&q=Winning+Speech+Karan+Aujla",
+        "image": "https://i.ytimg.com/vi/ufCaQrNCUC4/hqdefault.jpg",
+        "genre": "Punjabi",
+        "year": "2024",
+        "source": "AuraMusic HD",
+        "lyrics": [
+          {
+            "time": 4,
+            "text": "Yeah! Karan Aujla!"
+          },
+          {
+            "time": 10,
+            "text": "Sau gallan di ikko gall ae"
+          },
+          {
+            "time": 16,
+            "text": "Kayi kehnde ne kismat chaldi"
+          },
+          {
+            "time": 22,
+            "text": "Kayi kehnde ne mehnat chaldi"
+          },
+          {
+            "time": 28,
+            "text": "Main keha dohaan da hi roll ae"
+          },
+          {
+            "time": 35,
+            "text": "Par niyat saaf honi chahidi"
+          },
+          {
+            "time": 42,
+            "text": "Winning speech taan har koyi dinda"
+          },
+          {
+            "time": 49,
+            "text": "Par haar ke khadna aunda ni kise nu"
+          },
+          {
+            "time": 58,
+            "text": "Assi taan jatt hege aan, jithe khadiye othe gaddi khad di"
+          },
+          {
+            "time": 68,
+            "text": "Lokaan di gallan te dhyan ni ditta kade"
+          },
+          {
+            "time": 78,
+            "text": "Apne dum te banaya mukaam saara"
+          },
+          {
+            "time": 88,
+            "text": "Geetan di machine kehnde duniya saari!"
+          }
+        ]
+      },
+      {
+        "rank": 2,
+        "id": "yt_LK7-_dgAVQE",
+        "streamUrl": "https://aac.saavncdn.com/992/5d44da8bc1d78fb72d18b701d758fd1f_320.mp4",
+        "name": "Tauba Tauba",
+        "artist": "Karan Aujla",
+        "album": "Bad Newz",
+        "duration": 208,
+        "url": "/api/yt/stream?id=LK7-_dgAVQE&q=Tauba+Tauba+Karan+Aujla",
+        "image": "https://i.ytimg.com/vi/LK7-_dgAVQE/hqdefault.jpg",
+        "genre": "Punjabi",
+        "year": "2024",
+        "source": "AuraMusic HD",
+        "lyrics": [
+          {
+            "time": 5,
+            "text": "Husn tera tauba tauba!"
+          },
+          {
+            "time": 12,
+            "text": "Nain tere agg launde ne"
+          },
+          {
+            "time": 18,
+            "text": "Chadhdi jawani teri lutt le gayi saanu"
+          },
+          {
+            "time": 25,
+            "text": "Kardi ae nakhre te turdi kamaal"
+          },
+          {
+            "time": 32,
+            "text": "Takke jadon munda ohnu bhul jave saar"
+          },
+          {
+            "time": 40,
+            "text": "O tauba tauba re tauba tauba!"
+          },
+          {
+            "time": 48,
+            "text": "Suit patiala tera jachda bathera"
+          },
+          {
+            "time": 56,
+            "text": "Akhan vich surma te koka vi sunhera"
+          }
+        ]
+      }
+    ]
+  }
+}

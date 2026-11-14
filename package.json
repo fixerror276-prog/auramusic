@@ -1,0 +1,13 @@
+{
+  "name": "auramusic-rea",
+  "version": "1.0.0",
+  "description": "AuraMusic - Faithful clone of AuraMusic lossless music streaming player",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "keywords": ["auramusic", "music-player", "hifi", "streaming"],
+  "author": "Google DeepMind Agent",
+  "license": "ISC"
+}
