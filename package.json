@@ -9,5 +9,8 @@
   },
   "keywords": ["auramusic", "music-player", "hifi", "streaming"],
   "author": "Google DeepMind Agent",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@distube/ytdl-core": "^5.2.1"
+  }
 }

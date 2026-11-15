@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { Ytdl } from '@distube/ytdl-core';
+const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -571,14 +573,103 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
+// Live YouTube Music Search Scraper (Fast, accurate, no API key required)
+const searchCache = new Map();
+
+async function searchYouTube(query) {
+  if (!query || !query.trim()) return [];
+  const norm = query.trim().toLowerCase();
+  const cached = searchCache.get(norm);
+  if (cached && Date.now() - cached.time < 3600000) return cached.data;
+
+  try {
+    const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query.trim());
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(4500)
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const match = html.match(/var ytInitialData = ({.*?});<\/script>/s) || html.match(/ytInitialData = ({.*?});/s);
+    if (!match) return [];
+    const data = JSON.parse(match[1]);
+    const section = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+    const songs = [];
+    if (Array.isArray(section)) {
+      for (const s of section) {
+        const items = s.itemSectionRenderer?.contents;
+        if (Array.isArray(items)) {
+          for (const item of items) {
+            if (item.videoRenderer?.videoId) {
+              const v = item.videoRenderer;
+              const rawTitle = v.title?.runs?.map(r => r.text).join('') || '';
+              const artist = v.ownerText?.runs?.map(r => r.text).join('') || '';
+              songs.push({
+                id: 'yt_' + v.videoId,
+                videoId: v.videoId,
+                name: rawTitle,
+                artist: artist,
+                album: 'YouTube Music Single',
+                duration: 200,
+                image: v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+                url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(rawTitle)}`,
+                genre: 'Music',
+                year: '2024',
+                source: 'AuraMusic Live'
+              });
+            } else if (item.lockupViewModel) {
+              const vm = item.lockupViewModel;
+              const meta = vm.metadata?.lockupMetadataViewModel;
+              const title = meta?.title?.content || '';
+              let vid = '';
+              if (vm.contentId && vm.contentId.length === 11) vid = vm.contentId;
+              const mRows = meta?.metadata?.contentMetadataViewModel?.metadataRows || [];
+              for (const r of mRows) {
+                for (const p of r.metadataParts || []) {
+                  for (const cr of p.text?.commandRuns || []) {
+                    const wep = cr.onTap?.innertubeCommand?.watchEndpoint;
+                    if (wep?.videoId && !vid) vid = wep.videoId;
+                  }
+                }
+              }
+              if (vid && title) {
+                const artist = mRows[0]?.metadataParts?.[0]?.text?.content || 'Artist';
+                songs.push({
+                  id: 'yt_' + vid,
+                  videoId: vid,
+                  name: title,
+                  artist: artist,
+                  album: 'Single',
+                  duration: 210,
+                  image: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+                  url: `/api/yt/stream?id=${vid}&q=${encodeURIComponent(title)}`,
+                  genre: 'Music',
+                  year: '2024',
+                  source: 'AuraMusic Live'
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    if (songs.length > 0) {
+      searchCache.set(norm, { time: Date.now(), data: songs });
+    }
+    return songs;
+  } catch (err) {
+    return [];
+  }
+}
+
       // App Proxy / Search / Lyrics / Playlists APIs (Preserving existing website features)
       if (pathname === '/api/yt/search') {
         const query = parsedUrl.searchParams.get('q') || '';
-        try {
-          const upstream = await fetch(`https://auramusic-2026.netlify.app/api/yt/search?q=${encodeURIComponent(query)}`);
-          if (upstream.ok) return sendJson(res, 200, await upstream.json());
-        } catch {}
-        return sendJson(res, 200, []);
+        const results = await searchYouTube(query);
+        return sendJson(res, 200, results);
       }
 
       if (pathname === '/api/yt/lyrics') {
@@ -593,20 +684,28 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (pathname === '/api/yt/stream') {
-        const id = parsedUrl.searchParams.get('id');
-        const q = parsedUrl.searchParams.get('q');
+        const id = parsedUrl.searchParams.get('id') || '';
+        const cleanId = id.replace(/^yt_|^yt-/, '').trim();
+        if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
+
         try {
-          const upstream = await fetch(`https://auramusic-2026.netlify.app/api/yt/stream?id=${encodeURIComponent(id || '')}&q=${encodeURIComponent(q || '')}`);
-          if (upstream.ok) {
-            const buf = await upstream.arrayBuffer();
-            res.writeHead(200, {
-              'Content-Type': upstream.headers.get('content-type') || 'audio/mp4',
-              'Content-Length': buf.byteLength
-            });
-            return res.end(Buffer.from(buf));
-          }
-        } catch {}
-        return sendJson(res, 404, { error: 'Stream not found' });
+          const dlStream = ytAudioClient.download(`https://www.youtube.com/watch?v=${cleanId}`, {
+            filter: { hasAudio: true, hasVideo: false }
+          });
+          res.writeHead(200, {
+            'Content-Type': 'audio/mp4',
+            'Accept-Ranges': 'bytes',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'no-store'
+          });
+          dlStream.on('error', (dlErr) => {
+            if (!res.headersSent) sendJson(res, 500, { error: 'Audio stream failed' });
+          });
+          res.on('close', () => dlStream.destroy());
+          return dlStream.pipe(res);
+        } catch (err) {
+          return sendJson(res, 500, { error: 'Stream failed' });
+        }
       }
 
       if (pathname === '/api/playlists') {
