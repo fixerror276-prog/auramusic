@@ -8,11 +8,18 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.webkit.CookieManager;
+import android.webkit.MimeTypeMap;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
@@ -50,6 +57,29 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
+            // Static files (JS, CSS, artist and avatar images) are bundled in the APK, so the UI
+            // opens instantly. index.html and every /api call still come from the server, and
+            // the hashed file names mean a newer site never picks up an outdated bundled file.
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if (!"GET".equals(request.getMethod()) || uri.getHost() == null || !uri.getHost().equals(appHost)) {
+                    return null;
+                }
+                String path = uri.getPath();
+                if (path == null || !(path.startsWith("/assets/") || path.startsWith("/artists/") || path.startsWith("/avatars/"))) {
+                    return null;
+                }
+                try {
+                    InputStream in = getAssets().open(path.substring(1));
+                    Map<String, String> headers = new HashMap<>();
+                    headers.put("Access-Control-Allow-Origin", "*");
+                    return new WebResourceResponse(mimeFor(path), "utf-8", 200, "OK", headers, in);
+                } catch (IOException notBundled) {
+                    return null; // fall back to the network
+                }
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
@@ -113,6 +143,16 @@ public class MainActivity extends Activity {
         if (isFinishing()) stopService(new Intent(this, PlaybackService.class));
         webView.destroy();
         super.onDestroy();
+    }
+
+    private static String mimeFor(String path) {
+        String lower = path.toLowerCase();
+        if (lower.endsWith(".js")) return "text/javascript";
+        if (lower.endsWith(".css")) return "text/css";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        int dot = lower.lastIndexOf('.');
+        String type = dot >= 0 ? MimeTypeMap.getSingleton().getMimeTypeFromExtension(lower.substring(dot + 1)) : null;
+        return type != null ? type : "application/octet-stream";
     }
 
     private void startPlaybackService() {
