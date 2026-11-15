@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+def appUrl = (project.findProperty('appUrl') ?: '').toString().trim()
+
+android {
+    namespace 'com.auramusic.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.auramusic.app'
+        minSdk 24
+        targetSdk 34
+        versionCode (project.findProperty('versionCode') ?: '1').toString().toInteger()
+        versionName '1.0'
+        buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // A fixed key, so a newer APK installs over the older one instead of failing.
+    signingConfigs {
+        release {
+            storeFile file('../aura.keystore')
+            storePassword 'auramusic123'
+            keyAlias 'aura'
+            keyPassword 'auramusic123'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

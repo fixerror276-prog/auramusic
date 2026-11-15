@@ -1,0 +1,55 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the app URL
+        id: url
+        run: |
+          URL="${{ vars.APP_URL }}"
+          if [ -z "$URL" ]; then URL="$(tr -d '[:space:]' < android/APP_URL.txt)"; fi
+          if [ -z "$URL" ]; then
+            echo "::error::App URL missing. Put your deployed site URL (https://...) in android/APP_URL.txt"
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build signed APK
+        working-directory: android
+        run: gradle assembleRelease -PappUrl="${{ steps.url.outputs.url }}" -PversionCode=${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AuraMusic-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish to the apk-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk AuraMusic.apk
+          gh release delete apk-latest --cleanup-tag -y || true
+          gh release create apk-latest AuraMusic.apk --title "AuraMusic APK" \
+            --notes "Latest Android build (run ${{ github.run_number }}). Download AuraMusic.apk and install it."
