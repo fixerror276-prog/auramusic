@@ -869,17 +869,12 @@
       const listContainer = document.getElementById('google-accounts-list');
       const customForm = document.getElementById('google-custom-form');
 
-      // Exact accounts from user's system + any newly created accounts
-      const defaultAccounts = [
-        { name: 'Fixerror', email: 'fixerror276@gmail.com', bg: '#673ab7', initial: 'F' },
-        { name: 'Yt pr', email: 'ytpr621@gmail.com', bg: '#e64a19', initial: 'Y' },
-        { name: 'Formwork', email: 'formwork194@gmail.com', bg: '#388e3c', initial: 'F' }
-      ];
-
+      // Only accounts this user actually signed in with on this device are listed.
+      // (Previously three hardcoded Gmail accounts were always shown for everyone.)
       let savedAccs = [];
       try { savedAccs = JSON.parse(localStorage.getItem('auramusic_saved_accounts') || '[]'); } catch {}
 
-      const allAccounts = [...defaultAccounts];
+      const allAccounts = [];
       savedAccs.forEach(s => {
         // filter out unwanted dummy names
         if (s.email && !s.email.includes('freefy') && !s.email.includes('admin@admin') && !allAccounts.some(a => a.email.toLowerCase() === s.email.toLowerCase())) {
@@ -930,6 +925,11 @@
         if (em) em.focus();
       };
       listContainer.appendChild(useAnotherItem);
+
+      // No saved accounts on this device: open the email entry form directly.
+      if (allAccounts.length === 0) {
+        customForm.style.display = 'block';
+      }
 
       const customConfirmBtn = document.getElementById('google-confirm-custom-btn');
       if (customConfirmBtn) {
