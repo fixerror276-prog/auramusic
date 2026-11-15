@@ -22,8 +22,9 @@ const INVIDIOUS_INSTANCES = splitList(
   'https://inv.nadeko.net,https://yewtu.be'
 );
 
-const YTDL_TIMEOUT_MS = 5000;
-const PORTABLE_TIMEOUT_MS = 4500;
+const YTDL_TIMEOUT_MS = 4000;
+const PORTABLE_TIMEOUT_MS = 3500;
+const HEDGE_DELAY_MS = 1200;                  // off-serverless: give ytdl a head start, then race fallbacks
 const YTDL_TTL_MS = 4 * 60 * 60 * 1000;      // googlevideo URLs live ~6h
 const PORTABLE_TTL_MS = 60 * 60 * 1000;
 
@@ -143,59 +144,95 @@ export function urlWorksForClient(url, clientIp) {
 const looksLikeDatacenter = () =>
   Boolean(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
+// Concurrent callers for the same id (e.g. a prefetch and the real play) share one lookup.
+const inflight = new Map();
+function dedupe(key, factory) {
+  if (inflight.has(key)) return inflight.get(key);
+  const p = factory().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
 async function getYtdlUrl(client, id) {
-  const cached = getCached(`ytdl:${id}`);
+  const key = `ytdl:${id}`;
+  const cached = getCached(key);
   if (cached) return cached;
-  const url = await withTimeout(ytdlExtract(client, id), YTDL_TIMEOUT_MS, 'ytdl');
-  setCached(`ytdl:${id}`, url, YTDL_TTL_MS);
-  return url;
+  return dedupe(key, async () => {
+    const url = await withTimeout(ytdlExtract(client, id), YTDL_TIMEOUT_MS, 'ytdl');
+    setCached(key, url, YTDL_TTL_MS);
+    return url;
+  });
 }
 
 async function getPortable(id) {
-  const cached = getCached(`portable:${id}`);
+  const key = `portable:${id}`;
+  const cached = getCached(key);
   if (cached) return cached;
-  const found = await withTimeout(portableExtract(id), PORTABLE_TIMEOUT_MS + 500, 'fallback');
-  setCached(`portable:${id}`, found, PORTABLE_TTL_MS);
-  return found;
+  return dedupe(key, async () => {
+    const found = await withTimeout(portableExtract(id), PORTABLE_TIMEOUT_MS + 500, 'fallback');
+    setCached(key, found, PORTABLE_TTL_MS);
+    return found;
+  });
+}
+
+// Resolves with the first truthy value, or null once every promise has settled without one.
+function firstUseful(promises) {
+  return new Promise(resolve => {
+    let pending = promises.length;
+    if (!pending) return resolve(null);
+    const settle = v => {
+      if (v) resolve(v);
+      else if (--pending === 0) resolve(null);
+    };
+    for (const p of promises) p.then(settle, () => settle(null));
+  });
+}
+
+// Fills the caches ahead of time so the first tap on a song is instant. Never throws.
+export function warmAudio(client, ids) {
+  for (const id of ids) {
+    if (!id) continue;
+    getYtdlUrl(client, id).catch(() => {});
+    getPortable(id).catch(() => {});
+  }
 }
 
 // Returns { streamUrl, source } or null.
+// The direct (ytdl) lookup and the Piped/Invidious lookup run at the same time and the first
+// URL that will actually play for this client wins, instead of waiting for one to fail first.
 export async function resolveAudio(client, id, clientIp) {
+  let ytdlUsable = false;
+
   const ytdlPromise = getYtdlUrl(client, id).catch(e => {
     console.warn(`[AUDIO] ytdl failed for ${id}: ${e.message}`);
     return null;
   });
-  const lookupPortable = () => getPortable(id).catch(e => {
-    console.warn(`[AUDIO] fallback instances failed for ${id}: ${e.message}`);
+  const ytdlResult = ytdlPromise.then(url => {
+    if (url && urlWorksForClient(url, clientIp)) {
+      ytdlUsable = true;
+      return { streamUrl: url, source: 'ytdl' };
+    }
     return null;
   });
-  const fromPortable = p => ({ streamUrl: p.url, source: p.source });
 
-  let ytdlUrl;
-  let portablePromise = null;
+  // On serverless hosts the ytdl URL rarely works for the client, so start the fallback
+  // immediately. Elsewhere ytdl is preferred: only start the fallback if it is slow or unusable.
+  const hedgeMs = looksLikeDatacenter() ? 0 : HEDGE_DELAY_MS;
+  const portableResult = new Promise(resolve => setTimeout(resolve, hedgeMs))
+    .then(async () => {
+      if (ytdlUsable) return null;
+      const p = await getPortable(id).catch(e => {
+        console.warn(`[AUDIO] fallback instances failed for ${id}: ${e.message}`);
+        return null;
+      });
+      return p ? { streamUrl: p.url, source: p.source } : null;
+    });
 
-  if (looksLikeDatacenter()) {
-    // On serverless hosts the ytdl URL is unlikely to work for the client, so look up the
-    // portable source at the same time and use whichever answers usefully first.
-    portablePromise = lookupPortable();
-    const first = await Promise.race([
-      ytdlPromise.then(url => ({ ytdl: true, url })),
-      portablePromise.then(p => ({ ytdl: false, p }))
-    ]);
-    if (!first.ytdl && first.p) return fromPortable(first.p);
-    ytdlUrl = first.ytdl ? first.url : await ytdlPromise;
-  } else {
-    ytdlUrl = await ytdlPromise;
-  }
-
-  if (ytdlUrl && urlWorksForClient(ytdlUrl, clientIp)) {
-    return { streamUrl: ytdlUrl, source: 'ytdl' };
-  }
-
-  const portable = await (portablePromise || lookupPortable());
-  if (portable) return fromPortable(portable);
+  const winner = await firstUseful([ytdlResult, portableResult]);
+  if (winner) return winner;
 
   // Last resort: the ytdl URL even though it may be locked to another IP.
+  const ytdlUrl = await ytdlPromise;
   if (ytdlUrl) return { streamUrl: ytdlUrl, source: 'ytdl-ip-mismatch' };
   return null;
 }

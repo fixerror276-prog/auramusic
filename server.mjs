@@ -7,7 +7,7 @@ import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
-import { resolveAudio, diagnose, getClientIp } from './audio_sources.mjs';
+import { resolveAudio, diagnose, getClientIp, warmAudio } from './audio_sources.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -664,16 +664,19 @@ async function searchYouTube(query) {
   if (!query || !query.trim()) return [];
   const norm = query.trim().toLowerCase();
   const cached = searchCache.get(norm);
-  if (cached && Date.now() - cached.time < 3600000) return cached.data;
+  if (cached && Date.now() - cached.time < 3600000) {
+    warmAudio(ytAudioClient, cached.data.slice(0, 3).map(s => s.videoId));
+    return cached.data;
+  }
 
   const songs = [];
 
   // Primary: use @distube/ytdl-core built-in search (most reliable)
   try {
-    const results = await ytAudioClient.search(query.trim(), {
-      type: SearchType.Video,
-      limit: 15
-    });
+    const results = await Promise.race([
+      ytAudioClient.search(query.trim(), { type: SearchType.Video, limit: 15 }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('search timeout')), 4000))
+    ]);
     if (Array.isArray(results) && results.length > 0) {
       for (const v of results) {
         if (!v.id) continue;
@@ -744,6 +747,8 @@ async function searchYouTube(query) {
 
   if (songs.length > 0) {
     searchCache.set(norm, { time: Date.now(), data: songs });
+    // Resolve stream URLs for the top hits in the background so tapping a song starts instantly.
+    warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
   }
   return songs;
 }
@@ -764,6 +769,14 @@ async function searchYouTube(query) {
           if (upstream.ok) return sendJson(res, 200, await upstream.json());
         } catch {}
         return sendJson(res, 200, { plainLyrics: 'Lyrics unavailable.' });
+      }
+
+      // Warm the stream cache for a list of ids: /api/yt/prefetch?ids=a,b,c
+      if (pathname === '/api/yt/prefetch') {
+        const ids = (parsedUrl.searchParams.get('ids') || '')
+          .split(',').map(v => v.replace(/^yt_|^yt-/, '').trim()).filter(Boolean).slice(0, 5);
+        warmAudio(ytAudioClient, ids);
+        return sendJson(res, 200, { warming: ids.length });
       }
 
       // Open /api/yt/diag?id=<videoId> in a browser to see which audio source works on this host.
