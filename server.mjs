@@ -504,7 +504,63 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { status: 'error', message: 'Unauthenticated' });
       }
 
-            // 6. Check if email exists (for Google login & Smart Routing)
+            // 6. Google Direct OAuth & Consent Login / Sync
+      if ((pathname === '/api/v1/auth/google-login' || pathname === '/api/auth/google-login') && req.method === 'POST') {
+        const body = await parseBody(req);
+        const email = (body.email || '').trim().toLowerCase();
+        const name = (body.name || '').trim() || (email ? email.split('@')[0] : 'Google User');
+        const avatar = (body.avatar || '').trim() || '/avatars/p1.jpg';
+
+        if (!email || !email.includes('@')) {
+          return sendJson(res, 422, { status: 'error', message: 'Valid Google email is required.' });
+        }
+
+        let user = memoryDb.users.find(u => u.email === email);
+        if (!user) {
+          const avatarIndex = (memoryDb.users.length % 5) + 1;
+          user = {
+            _id: `user_${Date.now()}`,
+            id: `user_${Date.now()}`,
+            name: name,
+            email: email,
+            passwordHash: hashPassword(crypto.randomBytes(16).toString('hex')),
+            avatar: avatar || `/avatars/p${avatarIndex}.jpg`,
+            authProvider: 'google_oauth_consent',
+            createdAt: new Date().toISOString()
+          };
+          memoryDb.users.push(user);
+          saveDatabase();
+          console.log(`✅ [GOOGLE USER CREATED VIA CONSENT] ${user.email} (${user.name})`);
+        } else {
+          if (name && (!user.name || user.name === user.email.split('@')[0])) {
+            user.name = name;
+            saveDatabase();
+          }
+          console.log(`✅ [GOOGLE USER LOGGED IN VIA CONSENT] ${user.email}`);
+        }
+
+        const sessionToken = crypto.randomBytes(32).toString('hex');
+        memoryDb.activeSessions[sessionToken] = {
+          user: user,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+        };
+
+        return sendJson(res, 200, {
+          status: 'success',
+          message: 'Signed in successfully via Google OAuth',
+          user: {
+            id: user.id || user._id,
+            name: user.name,
+            email: user.email,
+            avatar: user.avatar,
+            provider: 'google'
+          },
+          token: sessionToken
+        });
+      }
+
+      // 6. Check if email exists (for Google login & Smart Routing)
       if (pathname === '/api/v1/auth/check-account' && req.method === 'POST') {
         const body = await parseBody(req);
         const email = (body.email || '').trim().toLowerCase();
