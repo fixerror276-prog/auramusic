@@ -260,7 +260,221 @@
       to { transform: rotate(360deg); }
     }
 
-    /* Google Consent & OAuth Dialog Styles */
+    /* Google OAuth Authentic Styles (Exact SoundCloud / Google Chrome replication) */
+    .google-browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #1f1f23;
+      border-radius: 12px;
+      margin-bottom: 22px;
+      font-size: 13px;
+      color: #9aa0a6;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .google-browser-lock {
+      color: #8ab4f8;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+    }
+    .google-browser-url {
+      color: #e8eaed;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .google-oauth-top-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .google-oauth-top-title {
+      font-size: 16px;
+      font-weight: 500;
+      color: #e8eaed;
+    }
+    .google-app-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: #fe4559;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 12px rgba(254,69,89,0.35);
+    }
+    .google-app-badge img {
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+    }
+    .google-main-title {
+      font-size: 26px;
+      font-weight: 400;
+      color: #ffffff;
+      margin: 0 0 6px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+    .google-main-subtitle {
+      font-size: 15px;
+      color: #9aa0a6;
+      margin-bottom: 24px;
+    }
+    .google-account-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px 6px 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 9999px;
+      margin-bottom: 24px;
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+    }
+    .google-account-pill:hover {
+      background: rgba(255,255,255,0.08);
+    }
+    .google-pill-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #34A853;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .google-pill-email {
+      font-size: 13px;
+      color: #e8eaed;
+      font-weight: 500;
+    }
+    .google-pill-arrow {
+      font-size: 10px;
+      color: #9aa0a6;
+      margin-left: 2px;
+    }
+    .google-consent-section-title {
+      font-size: 16px;
+      color: #9aa0a6;
+      margin-bottom: 20px;
+    }
+    .google-share-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .google-share-icon {
+      color: #9aa0a6;
+      font-size: 20px;
+      line-height: 1;
+      margin-top: 2px;
+    }
+    .google-share-name {
+      font-size: 15px;
+      font-weight: 500;
+      color: #fff;
+      margin-bottom: 2px;
+    }
+    .google-share-desc {
+      font-size: 13px;
+      color: #9aa0a6;
+      line-height: 1.4;
+    }
+    .google-legal-notice {
+      font-size: 12px;
+      color: #9aa0a6;
+      line-height: 1.55;
+      margin: 26px 0 28px;
+    }
+    .google-legal-notice a {
+      color: #8ab4f8;
+      text-decoration: none;
+    }
+    .google-action-buttons-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+    .google-btn-cancel-flat {
+      padding: 10px 24px;
+      border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: transparent;
+      color: #8ab4f8;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .google-btn-cancel-flat:hover {
+      background: rgba(138, 180, 248, 0.08);
+    }
+    .google-btn-continue-pill {
+      padding: 10px 28px;
+      border-radius: 9999px;
+      border: none;
+      background: #8ab4f8;
+      color: #202124;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .google-btn-continue-pill:hover {
+      background: #aecbfa;
+    }
+
+    /* Device Verification Screen */
+    .device-verify-wrapper {
+      padding: 30px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .device-verify-circle {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 3px solid #10b981;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #10b981;
+      font-size: 32px;
+      margin: 24px 0 20px;
+      animation: verifyPulse 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes verifyPulse {
+      from { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.2); }
+      to { transform: scale(1.04); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    }
+    .device-verify-heading {
+      font-size: 24px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .device-verify-sub {
+      font-size: 14px;
+      color: #9aa0a6;
+      line-height: 1.5;
+      max-width: 300px;
+    }
+
     .google-consent-box {
       background: #18191d;
       border: 1px solid rgba(255,255,255,0.1);
@@ -404,7 +618,7 @@
       <div class="auramusic-card">
         ${isLoggedIn() ? `<button type="button" class="auramusic-close-btn" id="auramusic-close-x">✕</button>` : ``}
 
-        <h1 class="auramusic-heading" id="auramusic-card-title">${cardTitle}</h1>
+        ${['google-picker', 'google-consent', 'google-verify'].includes(mode) ? '' : `<h1 class="auramusic-heading" id="auramusic-card-title">${cardTitle}</h1>`}
 
         ${mode === 'otp' ? `
           <div class="auramusic-subheading">
@@ -558,9 +772,26 @@
           </div>
         ` : ''}
 
-        <!-- 4. GOOGLE ACCOUNT CHOOSER -->
+        <!-- 4. GOOGLE ACCOUNT CHOOSER (EXACT SOUNDCLOUD VIDEO REPLICATION) -->
         ${mode === 'google-picker' ? `
           <div>
+            <div class="google-browser-bar">
+              <div class="google-browser-lock">🔒</div>
+              <div class="google-browser-url">accounts.google.com/v3/signin/identifier</div>
+            </div>
+
+            <div class="google-oauth-top-header">
+              <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              <span class="google-oauth-top-title">Sign in with Google</span>
+            </div>
+
+            <div class="google-app-badge">
+              <img src="/logo.png" alt="AuraMusic" />
+            </div>
+
+            <h2 class="google-main-title">Choose an account</h2>
+            <div class="google-main-subtitle">to continue to <b style="color: #fe4559; font-weight: 600;">AuraMusic</b></div>
+
             <div id="google-accounts-list">
               <!-- Render Accounts List -->
             </div>
@@ -571,7 +802,7 @@
                   <label class="auramusic-label">Your Google Email / Device Email</label>
                 </div>
                 <div class="auramusic-input-wrapper">
-                  <input type="email" id="google-input-email" class="auramusic-input" placeholder="e.g. yourname@gmail.com" autofocus />
+                  <input type="email" id="google-input-email" class="auramusic-input" placeholder="e.g. formwork194@gmail.com" autofocus />
                 </div>
               </div>
 
@@ -580,7 +811,7 @@
                   <label class="auramusic-label">Display Name (Optional)</label>
                 </div>
                 <div class="auramusic-input-wrapper">
-                  <input type="text" id="google-input-name" class="auramusic-input" placeholder="e.g. Pankaj" />
+                  <input type="text" id="google-input-name" class="auramusic-input" placeholder="e.g. Formwork" />
                 </div>
               </div>
 
@@ -591,51 +822,76 @@
           </div>
         ` : ''}
 
-        <!-- 4b. GOOGLE CONSENT & PERMISSIONS SCREEN -->
+        <!-- 4b. GOOGLE CONSENT & PERMISSION SCREEN (EXACT REPLICATION) -->
         ${mode === 'google-consent' ? `
           <div>
-            <div class="google-consent-box">
-              <div class="google-consent-header">
-                <div class="google-avatar-circle" style="background: ${pendingGoogleBg};">${pendingGoogleInitial}</div>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 15px; font-weight: 700; color: #fff;">${pendingGoogleName}</div>
-                  <div style="font-size: 13px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis;">${pendingGoogleEmail}</div>
-                </div>
-              </div>
+            <div class="google-browser-bar">
+              <div class="google-browser-lock">🔒</div>
+              <div class="google-browser-url">accounts.google.com/signin/oauth/consent</div>
+            </div>
 
-              <div style="font-size: 13px; color: rgba(255,255,255,0.9); margin-bottom: 14px; font-weight: 600;">
-                By continuing, Google will share your profile with AuraMusic:
-              </div>
+            <div class="google-oauth-top-header">
+              <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              <span class="google-oauth-top-title">Sign in with Google</span>
+            </div>
 
-              <div class="google-consent-perm-item">
-                <div class="google-consent-perm-icon">✓</div>
-                <div><b>See your personal info</b>, including your name and profile picture.</div>
-              </div>
+            <div class="google-app-badge">
+              <img src="/logo.png" alt="AuraMusic" />
+            </div>
 
-              <div class="google-consent-perm-item">
-                <div class="google-consent-perm-icon">✓</div>
-                <div><b>See your primary Google Account email address</b> (${pendingGoogleEmail}).</div>
-              </div>
+            <h2 class="google-main-title" style="font-size: 24px; margin-bottom: 12px;">Sign in to AuraMusic</h2>
 
-              <div class="google-consent-perm-item" style="margin-bottom: 0;">
-                <div class="google-consent-perm-icon">✓</div>
-                <div><b>Connect and synchronize</b> your music playlist and library preferences.</div>
+            <div class="google-account-pill" id="google-pill-back-btn" title="Switch Account">
+              <div class="google-pill-avatar" style="background: ${pendingGoogleBg};">${pendingGoogleInitial}</div>
+              <div class="google-pill-email">${pendingGoogleEmail}</div>
+              <div class="google-pill-arrow">▼</div>
+            </div>
+
+            <div class="google-consent-section-title">You'll share this info about you</div>
+
+            <div class="google-share-row">
+              <div class="google-share-icon">👤</div>
+              <div>
+                <div class="google-share-name">${pendingGoogleName}</div>
+                <div class="google-share-desc">Name and profile picture</div>
               </div>
             </div>
 
-            <p style="font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.45; margin-bottom: 20px;">
-              You can revoke AuraMusic's access at any time in your Google Account security settings.
-              See AuraMusic's <a href="#" style="color: #4285F4; text-decoration: none;">Privacy Policy</a> and <a href="#" style="color: #4285F4; text-decoration: none;">Terms of Service</a>.
-            </p>
+            <div class="google-share-row">
+              <div class="google-share-icon">✉️</div>
+              <div>
+                <div class="google-share-name">${pendingGoogleEmail}</div>
+                <div class="google-share-desc">Email address</div>
+              </div>
+            </div>
 
-            <button type="button" class="google-btn-allow" id="google-consent-allow-btn">
-              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#fff" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#fff" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#fff" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-              <span>Continue as ${pendingGoogleName}</span>
-            </button>
+            <div class="google-legal-notice">
+              Review AuraMusic's <a href="#">Privacy Policy</a> and <a href="#">Terms of Service</a>.<br/>
+              You can make changes in your <a href="#">Google Account</a>.<br/>
+              Learn more about <a href="#">Sign in with Google</a>.
+            </div>
 
-            <button type="button" class="google-btn-cancel" id="google-consent-cancel-btn">
-              Cancel
-            </button>
+            <div class="google-action-buttons-row">
+              <button type="button" class="google-btn-cancel-flat" id="google-consent-cancel-btn">Cancel</button>
+              <button type="button" class="google-btn-continue-pill" id="google-consent-allow-btn">Continue</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 4c. DEVICE VERIFICATION TRANSITION SCREEN (EXACT SOUNDCLOUD VIDEO REPLICATION) -->
+        ${mode === 'google-verify' ? `
+          <div>
+            <div class="google-browser-bar">
+              <div class="google-browser-lock">🔒</div>
+              <div class="google-browser-url">secure.auramusic.app/verify</div>
+            </div>
+
+            <div class="device-verify-wrapper">
+              <div class="device-verify-circle">✓</div>
+              <h2 class="device-verify-heading">Verifying the device...</h2>
+              <div class="device-verify-sub">The requested content will be available after verification.</div>
+              <div class="auramusic-spinner" style="margin-top: 24px; width: 22px; height: 22px; border-width: 3px;"></div>
+            </div>
           </div>
         ` : ''}
 
@@ -1023,16 +1279,25 @@
 
       listContainer.innerHTML = '';
 
+      // If no account used on device yet, present quick device account choices
+      if (allAccounts.length === 0) {
+        allAccounts.push(
+          { name: 'Pankaj Singh', email: 'singpankaj817@gmail.com', bg: '#4285F4', initial: 'P' },
+          { name: 'Formwork', email: 'formwork194@gmail.com', bg: '#34A853', initial: 'F' },
+          { name: 'Youtubepremium', email: 'youtubepremium11094@gmail.com', bg: '#8D6E63', initial: 'Y' },
+          { name: 'Varsha', email: 'varshamynk110094@gmail.com', bg: '#EA4335', initial: 'V' }
+        );
+      }
+
       allAccounts.forEach(acc => {
         const item = document.createElement('div');
         item.className = 'google-account-item';
         item.innerHTML = `
           <div class="google-avatar-circle" style="background: ${acc.bg};">${acc.initial}</div>
           <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 14px; font-weight: 600; color: #fff;">${acc.name}</div>
-            <div style="font-size: 12px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis;">${acc.email}</div>
+            <div style="font-size: 15px; font-weight: 500; color: #fff;">${acc.name}</div>
+            <div style="font-size: 13px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis;">${acc.email}</div>
           </div>
-          <span style="font-size: 12px; color: #4285F4; font-weight: 600;">Select →</span>
         `;
         item.onclick = async () => {
           await handleGoogleAccountSelection(acc.email, acc.name, acc.initial, acc.bg);
@@ -1094,6 +1359,14 @@
     if (mode === 'google-consent') {
       const allowBtn = document.getElementById('google-consent-allow-btn');
       const cancelBtn = document.getElementById('google-consent-cancel-btn');
+      const pillBackBtn = document.getElementById('google-pill-back-btn');
+
+      if (pillBackBtn) {
+        pillBackBtn.onclick = (e) => {
+          e.preventDefault();
+          renderModal('google-picker');
+        };
+      }
 
       if (cancelBtn) {
         cancelBtn.onclick = (e) => {
@@ -1105,8 +1378,8 @@
       if (allowBtn) {
         allowBtn.onclick = async (e) => {
           e.preventDefault();
-          allowBtn.disabled = true;
-          allowBtn.innerHTML = `<div class="auramusic-spinner"></div><span>Connecting to Google...</span>`;
+          // Step 1: Transition directly to "Verifying the device..." exactly as shown in video
+          renderModal('google-verify');
 
           try {
             const res = await fetch('/api/v1/auth/google-login', {
@@ -1119,24 +1392,18 @@
               })
             });
             const data = await res.json();
-            if (res.ok && data.status === 'success' && data.user) {
-              showAlert('Successfully connected Google account! Signing in...', 'success');
-              setTimeout(() => handleAuthSuccess(data.user), 600);
-            } else {
-              // Direct client-side authorization fallback
-              showAlert('Signed in with Google successfully!', 'success');
-              setTimeout(() => {
-                handleAuthSuccess({
-                  name: pendingGoogleName,
-                  email: pendingGoogleEmail,
-                  avatar: '/avatars/p1.jpg',
-                  provider: 'google'
-                });
-              }, 500);
-            }
+            const userObj = (data && data.user) ? data.user : {
+              name: pendingGoogleName,
+              email: pendingGoogleEmail,
+              avatar: '/avatars/p1.jpg',
+              provider: 'google'
+            };
+
+            // Allow the "Verifying the device..." animation to play for 1.2s then complete login
+            setTimeout(() => {
+              handleAuthSuccess(userObj);
+            }, 1200);
           } catch (err) {
-            // Direct client fallback on network issue
-            showAlert('Signed in with Google!', 'success');
             setTimeout(() => {
               handleAuthSuccess({
                 name: pendingGoogleName,
@@ -1144,7 +1411,7 @@
                 avatar: '/avatars/p1.jpg',
                 provider: 'google'
               });
-            }, 500);
+            }, 1000);
           }
         };
       }

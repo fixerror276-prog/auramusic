@@ -161,6 +161,110 @@
     ],
     "user_1794771550624": [
       {
+        "rank": 3,
+        "id": "yt_BddP6PYo2gs",
+        "streamUrl": "https://aac.saavncdn.com/423/852ad6cc81d7733c5e9bfc46d7b063e2_320.mp4",
+        "name": "Kesariya",
+        "artist": "Arijit Singh, Pritam",
+        "album": "Brahmastra",
+        "duration": 268,
+        "url": "/api/yt/stream?id=BddP6PYo2gs&q=Kesariya+Arijit+Singh",
+        "image": "https://i.ytimg.com/vi/BddP6PYo2gs/hqdefault.jpg",
+        "genre": "Bollywood",
+        "year": "2023",
+        "source": "AuraMusic HD",
+        "lyrics": [
+          {
+            "time": 8,
+            "text": "Mujhko itna bataye koyi..."
+          },
+          {
+            "time": 16,
+            "text": "Kaise tujhse dil na lagaye koyi..."
+          },
+          {
+            "time": 25,
+            "text": "Rabba ne tujhko banane mein"
+          },
+          {
+            "time": 31,
+            "text": "Kar di hai husn ki khaali tijoriyan"
+          },
+          {
+            "time": 38,
+            "text": "Kajal ki siyahi se likhi"
+          },
+          {
+            "time": 44,
+            "text": "Hain tune jaane kitno ki love storiyan"
+          },
+          {
+            "time": 52,
+            "text": "Kesariya tera ishq hai piya..."
+          },
+          {
+            "time": 60,
+            "text": "Rang jaaun jo main haath lagaun"
+          },
+          {
+            "time": 68,
+            "text": "Din beete saara teri fikr mein"
+          },
+          {
+            "time": 76,
+            "text": "Rain saari teri khair manaun"
+          }
+        ]
+      },
+      {
+        "rank": 2,
+        "id": "yt_LK7-_dgAVQE",
+        "streamUrl": "https://aac.saavncdn.com/992/5d44da8bc1d78fb72d18b701d758fd1f_320.mp4",
+        "name": "Tauba Tauba",
+        "artist": "Karan Aujla",
+        "album": "Bad Newz",
+        "duration": 208,
+        "url": "/api/yt/stream?id=LK7-_dgAVQE&q=Tauba+Tauba+Karan+Aujla",
+        "image": "https://i.ytimg.com/vi/LK7-_dgAVQE/hqdefault.jpg",
+        "genre": "Punjabi",
+        "year": "2024",
+        "source": "AuraMusic HD",
+        "lyrics": [
+          {
+            "time": 5,
+            "text": "Husn tera tauba tauba!"
+          },
+          {
+            "time": 12,
+            "text": "Nain tere agg launde ne"
+          },
+          {
+            "time": 18,
+            "text": "Chadhdi jawani teri lutt le gayi saanu"
+          },
+          {
+            "time": 25,
+            "text": "Kardi ae nakhre te turdi kamaal"
+          },
+          {
+            "time": 32,
+            "text": "Takke jadon munda ohnu bhul jave saar"
+          },
+          {
+            "time": 40,
+            "text": "O tauba tauba re tauba tauba!"
+          },
+          {
+            "time": 48,
+            "text": "Suit patiala tera jachda bathera"
+          },
+          {
+            "time": 56,
+            "text": "Akhan vich surma te koka vi sunhera"
+          }
+        ]
+      },
+      {
         "rank": 1,
         "id": "yt_ufCaQrNCUC4",
         "streamUrl": "https://aac.saavncdn.com/089/64beffa430e4c948223ec6bfcc3a13f0_320.mp4",
