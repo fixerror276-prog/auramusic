@@ -792,9 +792,11 @@
 
     document.body.appendChild(overlay);
 
-    // Close handlers
-    document.getElementById('auramusic-close-x').onclick = closeModal;
-    document.getElementById('auramusic-top-logo').onclick = closeModal;
+    // Close handlers (safe check so it doesn't crash when user is not logged in)
+    const closeXBtn = document.getElementById('auramusic-close-x');
+    if (closeXBtn) closeXBtn.onclick = closeModal;
+    const topLogo = document.getElementById('auramusic-top-logo');
+    if (topLogo) topLogo.onclick = closeModal;
 
     // Mode switches
     const switchLink = document.getElementById('aura-switch-link');
