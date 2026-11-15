@@ -2,11 +2,16 @@ package com.auramusic.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.MimeTypeMap;
 import android.webkit.WebChromeClient;
@@ -34,9 +39,11 @@ public class MainActivity extends Activity {
 
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        } else {
+            askToIgnoreBatteryOptimizations();
         }
 
-        webView = new WebView(this);
+        webView = new KeepAliveWebView(this);
         webView.setBackgroundColor(BG);
         setContentView(webView);
 
@@ -143,6 +150,39 @@ public class MainActivity extends Activity {
         if (isFinishing()) stopService(new Intent(this, PlaybackService.class));
         webView.destroy();
         super.onDestroy();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        askToIgnoreBatteryOptimizations();
+    }
+
+    // Phone makers (Xiaomi, Oppo, Vivo, Samsung...) kill background apps unless the user exempts
+    // them. Ask once.
+    private void askToIgnoreBatteryOptimizations() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+            SharedPreferences prefs = getSharedPreferences("aura", MODE_PRIVATE);
+            if (prefs.getBoolean("batteryAsked", false)) return;
+            prefs.edit().putBoolean("batteryAsked", true).apply();
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) { }
+    }
+
+    // Without this, Chromium sees the window as hidden when the screen turns off, throttles the
+    // page and stops the music. Always reporting "visible" keeps it running.
+    private static class KeepAliveWebView extends WebView {
+        KeepAliveWebView(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected void onWindowVisibilityChanged(int visibility) {
+            super.onWindowVisibilityChanged(View.VISIBLE);
+        }
     }
 
     private static String mimeFor(String path) {

@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -18,6 +19,7 @@ public class PlaybackService extends Service {
     private static final String CHANNEL_ID = "aura_playback";
     private static final int NOTIFICATION_ID = 1;
     private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -56,6 +58,16 @@ public class PlaybackService extends Service {
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire();
         }
+
+        // Keep Wi-Fi at full speed with the screen off, or the stream stalls once the buffer runs out.
+        if (wifiLock == null) {
+            try {
+                WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AuraMusic:wifi");
+                wifiLock.setReferenceCounted(false);
+                wifiLock.acquire();
+            } catch (Exception ignored) { }
+        }
         return START_NOT_STICKY;
     }
 
@@ -63,6 +75,8 @@ public class PlaybackService extends Service {
     public void onDestroy() {
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         wakeLock = null;
+        if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+        wifiLock = null;
         super.onDestroy();
     }
 
