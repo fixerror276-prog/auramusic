@@ -330,7 +330,7 @@
       </div>
 
       <div class="auramusic-card">
-        <button type="button" class="auramusic-close-btn" id="auramusic-close-x">✕</button>
+        ${isLoggedIn() ? `<button type="button" class="auramusic-close-btn" id="auramusic-close-x">✕</button>` : ``}
 
         <h1 class="auramusic-heading" id="auramusic-card-title">${cardTitle}</h1>
 
@@ -1454,5 +1454,109 @@
       }
     }
   } catch {}
+
+
+  // Check if genuine logged in user exists
+  function isLoggedIn() {
+    try {
+      const u = JSON.parse(localStorage.getItem('auramusic_current_user') || 'null');
+      return !!(u && u.email && !u.email.includes('freefy') && !u.email.includes('admin@admin'));
+    } catch { return false; }
+  }
+
+  // APK Detection: Running in Capacitor / Cordova / PWA Standalone / Android WebView
+  const isAPKEnv = Boolean(
+    window.Capacitor ||
+    window.cordova ||
+    window.AndroidBridge ||
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone ||
+    navigator.userAgent.includes('AuraMusicAPK') ||
+    navigator.userAgent.includes('wv') ||
+    document.referrer.includes('android-app://')
+  );
+
+  // Auto-enforce Login on Startup & In-App UI adjustments
+  function enforceAuthAndEnhanceUI() {
+    // 1. In APK environment, remove web install/download buttons
+    if (isAPKEnv) {
+      document.querySelectorAll('#aura-sidebar-download-apk, #aura-header-download-apk, [title*="Install AuraMusic"]').forEach(el => {
+        const wrap = el.closest('#aura-sidebar-install-wrap') || el;
+        wrap.style.display = 'none';
+      });
+      Array.from(document.querySelectorAll('button, a')).forEach(b => {
+        const txt = (b.textContent || '').trim();
+        if (txt === 'Install App' || txt === 'Install' || txt === 'Install Web App' || txt === 'Download APK' || txt === 'Download Android APK') {
+          const parentDiv = b.closest('.px-3.pb-2.pt-1') || b;
+          parentDiv.style.display = 'none';
+        }
+      });
+    }
+
+    // 2. Enforce login: If user is not logged in, show login modal immediately
+    if (!isLoggedIn()) {
+      if (!document.getElementById('auramusic-auth-overlay')) {
+        renderModal('login');
+      }
+    }
+  }
+
+  // Taste Observer: Record and absorb user music taste (genres, artists, played songs)
+  function recordTaste(track) {
+    if (!track || !track.name) return;
+    try {
+      const u = JSON.parse(localStorage.getItem('auramusic_current_user') || 'null');
+      const userId = (u && u.email) ? u.email : 'guest';
+      const key = 'auramusic_user_taste_' + userId;
+      let taste = JSON.parse(localStorage.getItem(key) || '{"genres":{},"artists":{},"history":[]}');
+      
+      const artist = track.artist || 'AuraMusic Artist';
+      const genre = track.genre || 'Music';
+      
+      taste.artists[artist] = (taste.artists[artist] || 0) + 1;
+      taste.genres[genre] = (taste.genres[genre] || 0) + 1;
+      
+      taste.history.unshift({
+        id: track.id || track.videoId,
+        name: track.name,
+        artist: artist,
+        genre: genre,
+        timestamp: Date.now()
+      });
+      if (taste.history.length > 50) taste.history.pop();
+      localStorage.setItem(key, JSON.stringify(taste));
+
+      // Sync taste with backend
+      fetch('/api/user/taste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, track: { name: track.name, artist, genre, id: track.id || track.videoId } })
+      }).catch(() => {});
+    } catch (e) {
+      console.warn('Taste record warn:', e);
+    }
+  }
+
+  // Intercept HTML5 Audio play event to automatically observe user music taste & block playback if not logged in
+  window.addEventListener('play', (e) => {
+    if (e.target && e.target.tagName === 'AUDIO') {
+      if (!isLoggedIn()) {
+        e.target.pause();
+        e.target.currentTime = 0;
+        renderModal('login');
+        return;
+      }
+      try {
+        const curSong = JSON.parse(localStorage.getItem('auramusic_current_song') || 'null');
+        if (curSong) recordTaste(curSong);
+      } catch {}
+    }
+  }, true);
+
+  // Run on load and poll briefly to ensure UI is updated
+  setTimeout(enforceAuthAndEnhanceUI, 100);
+  setTimeout(enforceAuthAndEnhanceUI, 500);
+  setTimeout(enforceAuthAndEnhanceUI, 1200);
+  setInterval(enforceAuthAndEnhanceUI, 3000);
 
 })();

@@ -915,6 +915,34 @@ async function searchYouTube(query) {
         }
       }
 
+            // User Music Taste Observation & Recommendation Feed API
+      if (pathname === '/api/user/taste') {
+        if (!memoryDb.userTastes) memoryDb.userTastes = {};
+        if (req.method === 'POST') {
+          const body = await parseBody(req);
+          const userId = body.userId || parsedUrl.searchParams.get('userId') || 'guest';
+          const track = body.track;
+          if (track && track.name) {
+            if (!memoryDb.userTastes[userId]) {
+              memoryDb.userTastes[userId] = { genres: {}, artists: {}, history: [] };
+            }
+            const ut = memoryDb.userTastes[userId];
+            const artist = track.artist || 'AuraMusic Artist';
+            const genre = track.genre || 'Music';
+            ut.artists[artist] = (ut.artists[artist] || 0) + 1;
+            ut.genres[genre] = (ut.genres[genre] || 0) + 1;
+            ut.history.unshift({ ...track, timestamp: Date.now() });
+            if (ut.history.length > 100) ut.history.pop();
+            saveDatabase();
+          }
+          return sendJson(res, 200, { success: true, taste: memoryDb.userTastes[userId] || null });
+        }
+        if (req.method === 'GET') {
+          const userId = parsedUrl.searchParams.get('userId') || 'guest';
+          return sendJson(res, 200, { success: true, taste: memoryDb.userTastes[userId] || null });
+        }
+      }
+
       if (pathname === '/api/likes') {
         if (req.method === 'GET') {
           const userId = parsedUrl.searchParams.get('userId') || 'guest';
