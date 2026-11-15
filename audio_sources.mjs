@@ -22,6 +22,8 @@ const INVIDIOUS_INSTANCES = splitList(
   'https://inv.nadeko.net,https://yewtu.be'
 );
 
+const RELATED_TIMEOUT_MS = 4000;
+const RELATED_TTL_MS = 30 * 60 * 1000;
 const YTDL_TIMEOUT_MS = 4000;
 const PORTABLE_TIMEOUT_MS = 3500;
 const HEDGE_DELAY_MS = 300;                   // off-serverless: give ytdl a head start, then race fallbacks
@@ -289,4 +291,67 @@ export async function diagnose(client, id, clientIp) {
   const finalPick = await resolveAudio(client, id, clientIp);
   report.wouldPlayVia = finalPick ? finalPick.source : 'nothing (iframe fallback, stops when screen locks)';
   return report;
+}
+
+
+// ---- related ("what to play next") ----
+
+const idFromWatchUrl = u => (String(u || '').match(/[?&]v=([\w-]{11})/) || [])[1];
+
+async function pipedRelated(instance, id) {
+  const data = await fetchJson(`${instance}/streams/${encodeURIComponent(id)}`, RELATED_TIMEOUT_MS);
+  const items = (data.relatedStreams || [])
+    .filter(s => s && s.type !== 'playlist' && idFromWatchUrl(s.url))
+    .map(s => ({
+      videoId: idFromWatchUrl(s.url), title: s.title, artist: s.uploaderName,
+      duration: s.duration, image: s.thumbnail
+    }));
+  if (!items.length) throw new Error('no related');
+  return items;
+}
+
+async function invidiousRelated(instance, id) {
+  const data = await fetchJson(
+    `${instance}/api/v1/videos/${encodeURIComponent(id)}?local=true&fields=recommendedVideos`,
+    RELATED_TIMEOUT_MS
+  );
+  const items = (data.recommendedVideos || [])
+    .filter(v => v && v.videoId)
+    .map(v => ({
+      videoId: v.videoId, title: v.title, artist: v.author, duration: v.lengthSeconds,
+      image: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`
+    }));
+  if (!items.length) throw new Error('no related');
+  return items;
+}
+
+async function ytdlRelated(client, id) {
+  const info = await withTimeout(
+    client.getInfo(`https://www.youtube.com/watch?v=${id}`), RELATED_TIMEOUT_MS + 1000, 'ytdl related'
+  );
+  const items = (info.related_videos || [])
+    .filter(v => v && v.id)
+    .map(v => ({
+      videoId: v.id, title: v.title, artist: v.author?.name || v.author || '',
+      duration: v.length_seconds, image: v.thumbnails?.[v.thumbnails.length - 1]?.url
+    }));
+  if (!items.length) throw new Error('no related');
+  return items;
+}
+
+// Videos YouTube recommends after this one. First source that answers wins; cached.
+export async function getRelated(client, id) {
+  const key = `related:${id}`;
+  const cached = getCached(key);
+  if (cached) return cached;
+  return dedupe(key, async () => {
+    const attempts = [
+      ...PIPED_INSTANCES.map(i => pipedRelated(i, id)),
+      ...INVIDIOUS_INSTANCES.map(i => invidiousRelated(i, id)),
+      ytdlRelated(client, id)
+    ];
+    const list = await Promise.any(attempts);
+    setCached(key, list, RELATED_TTL_MS);
+    return list;
+  });
 }

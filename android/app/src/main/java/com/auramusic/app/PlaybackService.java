@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -44,7 +45,8 @@ public class PlaybackService extends Service {
     private static volatile Bitmap art = null;
     private static volatile boolean playing = false;
     private static volatile long durationMs = 0;
-    private static volatile long positionMs = 0;
+    private static volatile long positionMs = 0;      // position at positionAt
+    private static volatile long positionAt = 0;       // SystemClock.elapsedRealtime() of that position
     private static volatile PlaybackService instance;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -55,7 +57,12 @@ public class PlaybackService extends Service {
 
     // ---- called from the JavaScript bridge (any thread) ----
 
-    static void setMetadata(String newTitle, String newArtist, String newArtUrl) {
+    static synchronized void setMetadata(String newTitle, String newArtist, String newArtUrl) {
+        if (!newTitle.equals(title)) { // a new song starts from the beginning
+            positionMs = 0;
+            positionAt = SystemClock.elapsedRealtime();
+            durationMs = 0;
+        }
         title = newTitle;
         artist = newArtist;
         if (!newArtUrl.equals(artUrl)) {
@@ -65,15 +72,29 @@ public class PlaybackService extends Service {
         notifyChanged();
     }
 
-    static void setPlaying(boolean isPlaying) {
+    static synchronized void setPlaying(boolean isPlaying) {
+        long now = SystemClock.elapsedRealtime();
+        if (playing != isPlaying) {
+            // freeze the position on pause, restart the clock on play
+            positionMs = currentPosition(now);
+            positionAt = now;
+        }
         playing = isPlaying;
         notifyChanged();
     }
 
-    static void setPosition(long duration, long position) {
+    static synchronized void setPosition(long duration, long position) {
         durationMs = duration;
         positionMs = position;
+        positionAt = SystemClock.elapsedRealtime();
         notifyChanged();
+    }
+
+    // Where the song is now: the last reported position plus the time that passed since.
+    private static long currentPosition(long now) {
+        long pos = positionMs + (playing ? Math.max(0, now - positionAt) : 0);
+        if (durationMs > 0 && pos > durationMs) pos = durationMs;
+        return pos;
     }
 
     private static void notifyChanged() {
@@ -166,7 +187,7 @@ public class PlaybackService extends Service {
         session.setPlaybackState(new PlaybackState.Builder()
                 .setActions(actions)
                 .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
-                        positionMs, 1f)
+                        currentPosition(SystemClock.elapsedRealtime()), playing ? 1f : 0f)
                 .build());
 
         MediaMetadata.Builder meta = new MediaMetadata.Builder()

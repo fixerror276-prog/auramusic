@@ -30,7 +30,7 @@ final class BridgeScript {
   }
   function sendPosition(durationSec, positionSec, force) {
     var now = Date.now();
-    if (!force && now - lastPosSent < 2000) return;
+    if (!force && now - lastPosSent < 1000) return;
     if (!isFinite(durationSec) || !isFinite(positionSec)) return;
     lastPosSent = now;
     try { AuraNative.setPosition(Math.round(durationSec * 1000), Math.round(positionSec * 1000)); } catch (e) {}

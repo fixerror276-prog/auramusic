@@ -7,7 +7,7 @@ import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
-import { resolveAudio, diagnose, getClientIp, warmAudio } from './audio_sources.mjs';
+import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated } from './audio_sources.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -657,6 +657,22 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
+// "Same song" detection: drops remixes / lyric videos / slowed versions of the song that is
+// already playing, so "next" goes to a different song.
+const NOISE_WORDS = /\b(official|video|audio|lyrical|lyrics|lyric|full|song|songs|hd|4k|remix|slowed|reverb|lofi|cover|version|8d|bass|boosted|reprise|karaoke|instrumental|unplugged|live|male|female|feat|ft|music|visualizer|new)\b/g;
+function titleKey(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, ' ')
+    .replace(NOISE_WORDS, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+function sameSong(a, b) {
+  const x = titleKey(a), y = titleKey(b);
+  if (!x || !y) return false;
+  return x === y || (x.length >= 5 && y.length >= 5 && (x.includes(y) || y.includes(x)));
+}
+
 // Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
 const searchCache = new Map();
 
@@ -777,6 +793,50 @@ async function searchYouTube(query) {
           .split(',').map(v => v.replace(/^yt_|^yt-/, '').trim()).filter(Boolean).slice(0, 5);
         warmAudio(ytAudioClient, ids);
         return sendJson(res, 200, { warming: ids.length });
+      }
+
+      // Songs to play after this one: /api/yt/related?id=<videoId>&title=..&artist=..
+      if (pathname === '/api/yt/related') {
+        const id = (parsedUrl.searchParams.get('id') || '').replace(/^yt_|^yt-/, '').trim();
+        const title = parsedUrl.searchParams.get('title') || '';
+        const artist = parsedUrl.searchParams.get('artist') || '';
+        if (!id) return sendJson(res, 400, { error: 'Missing video id' });
+
+        const toSong = v => ({
+          id: 'yt_' + v.videoId,
+          videoId: v.videoId,
+          name: v.title,
+          artist: v.artist || 'Unknown Artist',
+          album: 'YouTube Music Single',
+          duration: Number(v.duration) || 200,
+          image: v.image || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(v.title || '')}`,
+          genre: 'Music',
+          year: new Date().getFullYear().toString(),
+          source: 'AuraMusic Live'
+        });
+
+        const picked = [];
+        const take = list => {
+          for (const v of list) {
+            if (!v?.videoId || v.videoId === id || !v.title) continue;
+            const dur = Number(v.duration) || 0;
+            if (dur && (dur < 60 || dur > 600)) continue;            // keep song-length videos
+            if (sameSong(v.title, title)) continue;                    // another version of this song
+            if (picked.some(p => p.videoId === v.videoId || sameSong(p.title, v.title))) continue;
+            picked.push(v);
+          }
+        };
+
+        try { take(await getRelated(ytAudioClient, id)); } catch (_) {}
+
+        // Not enough recommendations: more songs by the same artist.
+        if (picked.length < 5) {
+          const query = `${(artist || title).split(',')[0].trim()} songs`;
+          const found = await searchYouTube(query);
+          take(found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image })));
+        }
+        return sendJson(res, 200, picked.slice(0, 20).map(toSong));
       }
 
       // Open /api/yt/diag?id=<videoId> in a browser to see which audio source works on this host.
