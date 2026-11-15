@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -28,12 +29,33 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
+    private static MainActivity current;
     private WebView webView;
     private String appHost = "";
+
+    // Sends a lock-screen / notification button press to the site's own media handlers.
+    static void dispatch(String action, Double value) {
+        final MainActivity activity = current;
+        if (activity == null || activity.webView == null) return;
+        final String js = "window.__auraAction&&window.__auraAction('" + action + "',"
+                + (value == null ? "null" : value.toString()) + ")";
+        activity.webView.post(() -> {
+            activity.webView.resumeTimers();
+            activity.webView.evaluateJavascript(js, null);
+        });
+    }
+
+    private void injectBridge(WebView view, String url) {
+        try {
+            String host = Uri.parse(url).getHost();
+            if (host != null && host.equals(appHost)) view.evaluateJavascript(BridgeScript.JS, null);
+        } catch (Exception ignored) { }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        current = this;
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
 
@@ -62,8 +84,21 @@ public class MainActivity extends Activity {
             if (host != null) appHost = host;
         } catch (Exception ignored) { }
 
+        webView.addJavascriptInterface(new AuraBridge(), "AuraNative");
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                injectBridge(view, url);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                injectBridge(view, url);
+            }
+
             // Static files (JS, CSS, artist and avatar images) are bundled in the APK, so the UI
             // opens instantly. index.html and every /api call still come from the server, and
             // the hashed file names mean a newer site never picks up an outdated bundled file.
@@ -148,6 +183,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (isFinishing()) stopService(new Intent(this, PlaybackService.class));
+        if (current == this) current = null;
         webView.destroy();
         super.onDestroy();
     }
