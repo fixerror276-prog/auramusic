@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Ytdl } from '@distube/ytdl-core';
+import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 
@@ -573,7 +573,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-// Live YouTube Music Search Scraper (Fast, accurate, no API key required)
+// Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
 const searchCache = new Map();
 
 async function searchYouTube(query) {
@@ -582,87 +582,86 @@ async function searchYouTube(query) {
   const cached = searchCache.get(norm);
   if (cached && Date.now() - cached.time < 3600000) return cached.data;
 
+  const songs = [];
+
+  // Primary: use @distube/ytdl-core built-in search (most reliable)
   try {
-    const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query.trim());
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: AbortSignal.timeout(4500)
+    const results = await ytAudioClient.search(query.trim(), {
+      type: SearchType.Video,
+      limit: 15
     });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const match = html.match(/var ytInitialData = ({.*?});<\/script>/s) || html.match(/ytInitialData = ({.*?});/s);
-    if (!match) return [];
-    const data = JSON.parse(match[1]);
-    const section = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
-    const songs = [];
-    if (Array.isArray(section)) {
-      for (const s of section) {
-        const items = s.itemSectionRenderer?.contents;
-        if (Array.isArray(items)) {
-          for (const item of items) {
-            if (item.videoRenderer?.videoId) {
-              const v = item.videoRenderer;
-              const rawTitle = v.title?.runs?.map(r => r.text).join('') || '';
-              const artist = v.ownerText?.runs?.map(r => r.text).join('') || '';
-              songs.push({
-                id: 'yt_' + v.videoId,
-                videoId: v.videoId,
-                name: rawTitle,
-                artist: artist,
-                album: 'YouTube Music Single',
-                duration: 200,
-                image: v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-                url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(rawTitle)}`,
-                genre: 'Music',
-                year: '2024',
-                source: 'AuraMusic Live'
-              });
-            } else if (item.lockupViewModel) {
-              const vm = item.lockupViewModel;
-              const meta = vm.metadata?.lockupMetadataViewModel;
-              const title = meta?.title?.content || '';
-              let vid = '';
-              if (vm.contentId && vm.contentId.length === 11) vid = vm.contentId;
-              const mRows = meta?.metadata?.contentMetadataViewModel?.metadataRows || [];
-              for (const r of mRows) {
-                for (const p of r.metadataParts || []) {
-                  for (const cr of p.text?.commandRuns || []) {
-                    const wep = cr.onTap?.innertubeCommand?.watchEndpoint;
-                    if (wep?.videoId && !vid) vid = wep.videoId;
-                  }
+    if (Array.isArray(results) && results.length > 0) {
+      for (const v of results) {
+        if (!v.id) continue;
+        songs.push({
+          id: 'yt_' + v.id,
+          videoId: v.id,
+          name: v.title || query,
+          artist: v.author?.name || 'Unknown Artist',
+          album: 'YouTube Music Single',
+          duration: v.lengthSeconds || 200,
+          image: v.thumbnails?.[v.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+          url: `/api/yt/stream?id=${v.id}&q=${encodeURIComponent(v.title || query)}`,
+          genre: 'Music',
+          year: new Date().getFullYear().toString(),
+          source: 'AuraMusic Live'
+        });
+      }
+    }
+  } catch (_) {}
+
+  // Fallback: HTML scrape if ytdl search fails
+  if (songs.length === 0) {
+    try {
+      const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query.trim());
+      const r = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (r.ok) {
+        const html = await r.text();
+        const match = html.match(/var ytInitialData = ({.*?});<\/script>/s) || html.match(/ytInitialData = ({.*?});/s);
+        if (match) {
+          const data = JSON.parse(match[1]);
+          const section = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+          if (Array.isArray(section)) {
+            for (const s of section) {
+              const items = s.itemSectionRenderer?.contents;
+              if (!Array.isArray(items)) continue;
+              for (const item of items) {
+                if (item.videoRenderer?.videoId) {
+                  const v = item.videoRenderer;
+                  const rawTitle = v.title?.runs?.map(x => x.text).join('') || '';
+                  const artist = v.ownerText?.runs?.map(x => x.text).join('') || '';
+                  songs.push({
+                    id: 'yt_' + v.videoId,
+                    videoId: v.videoId,
+                    name: rawTitle,
+                    artist,
+                    album: 'YouTube Music Single',
+                    duration: 200,
+                    image: v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+                    url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(rawTitle)}`,
+                    genre: 'Music',
+                    year: new Date().getFullYear().toString(),
+                    source: 'AuraMusic Live'
+                  });
                 }
-              }
-              if (vid && title) {
-                const artist = mRows[0]?.metadataParts?.[0]?.text?.content || 'Artist';
-                songs.push({
-                  id: 'yt_' + vid,
-                  videoId: vid,
-                  name: title,
-                  artist: artist,
-                  album: 'Single',
-                  duration: 210,
-                  image: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
-                  url: `/api/yt/stream?id=${vid}&q=${encodeURIComponent(title)}`,
-                  genre: 'Music',
-                  year: '2024',
-                  source: 'AuraMusic Live'
-                });
               }
             }
           }
         }
       }
-    }
-    if (songs.length > 0) {
-      searchCache.set(norm, { time: Date.now(), data: songs });
-    }
-    return songs;
-  } catch (err) {
-    return [];
+    } catch (_) {}
   }
+
+  if (songs.length > 0) {
+    searchCache.set(norm, { time: Date.now(), data: songs });
+  }
+  return songs;
 }
 
       // App Proxy / Search / Lyrics / Playlists APIs (Preserving existing website features)
@@ -688,21 +687,43 @@ async function searchYouTube(query) {
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
         if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
 
+        // json=1 mode: return stream URL for client-side playback
+        if (parsedUrl.searchParams.get('json') === '1') {
+          try {
+            const info = await ytAudioClient.getInfo(`https://www.youtube.com/watch?v=${cleanId}`);
+            const audioFmt = info.formats
+              .filter(f => f.hasAudio && !f.hasVideo)
+              .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+            if (audioFmt?.url) return sendJson(res, 200, { streamUrl: audioFmt.url });
+          } catch {}
+          return sendJson(res, 404, { error: 'Stream not found' });
+        }
+
+        // Proxy stream mode
         try {
           const dlStream = ytAudioClient.download(`https://www.youtube.com/watch?v=${cleanId}`, {
-            filter: { hasAudio: true, hasVideo: false }
+            filter: { hasAudio: true, hasVideo: false },
+            quality: 'highestaudio'
           });
-          res.writeHead(200, {
-            'Content-Type': 'audio/mp4',
-            'Accept-Ranges': 'bytes',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'no-store'
+          let headersSent = false;
+          dlStream.on('info', (info, format) => {
+            if (!headersSent) {
+              headersSent = true;
+              const mimeType = format?.mimeType?.split(';')[0] || 'audio/mp4';
+              res.writeHead(200, {
+                'Content-Type': mimeType,
+                'Accept-Ranges': 'bytes',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-store'
+              });
+            }
           });
           dlStream.on('error', (dlErr) => {
-            if (!res.headersSent) sendJson(res, 500, { error: 'Audio stream failed' });
+            if (!headersSent) sendJson(res, 500, { error: 'Audio stream failed' });
           });
           res.on('close', () => dlStream.destroy());
-          return dlStream.pipe(res);
+          dlStream.pipe(res);
+          return;
         } catch (err) {
           return sendJson(res, 500, { error: 'Stream failed' });
         }
