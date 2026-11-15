@@ -24,7 +24,7 @@ const INVIDIOUS_INSTANCES = splitList(
 
 const YTDL_TIMEOUT_MS = 4000;
 const PORTABLE_TIMEOUT_MS = 3500;
-const HEDGE_DELAY_MS = 1200;                  // off-serverless: give ytdl a head start, then race fallbacks
+const HEDGE_DELAY_MS = 300;                   // off-serverless: give ytdl a head start, then race fallbacks
 const YTDL_TTL_MS = 4 * 60 * 60 * 1000;      // googlevideo URLs live ~6h
 const PORTABLE_TTL_MS = 60 * 60 * 1000;
 
