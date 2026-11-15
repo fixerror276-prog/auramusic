@@ -953,25 +953,77 @@ async function searchYouTube(query) {
 
       if (pathname === '/api/playlists') {
         const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        if (!memoryDb.playlists[userId]) memoryDb.playlists[userId] = [];
+
+        // 1. GET Playlists
         if (req.method === 'GET') {
           return sendJson(res, 200, { success: true, playlists: memoryDb.playlists[userId] || [] });
         }
+
+        // 2. CREATE Playlist
         if (req.method === 'POST') {
           const body = await parseBody(req);
+          const name = (body.name || '').trim() || 'My Playlist';
           const newPlaylist = {
             id: `pl_${Date.now()}`,
-            name: body.name || 'Untitled Playlist',
+            name: name,
             description: body.description || '',
             songs: [],
             createdAt: new Date().toISOString()
           };
-          if (!memoryDb.playlists[userId]) memoryDb.playlists[userId] = [];
-          memoryDb.playlists[userId].push(newPlaylist);
+          memoryDb.playlists[userId].unshift(newPlaylist);
+          saveDatabase();
+          console.log(`✅ [PLAYLIST CREATED] "${name}" for user ${userId}`);
           return sendJson(res, 200, { success: true, playlist: newPlaylist });
+        }
+
+        // 3. ADD or REMOVE song in Playlist
+        if (req.method === 'PUT') {
+          const body = await parseBody(req);
+          const playlistId = String(body.playlistId || '');
+          const action = body.action || 'add';
+          const pl = memoryDb.playlists[userId].find(p => String(p.id || p._id) === playlistId);
+
+          if (!pl) {
+            return sendJson(res, 404, { success: false, message: 'Playlist not found' });
+          }
+
+          if (action === 'add' && body.song) {
+            const song = body.song;
+            const songId = song.id || song.videoId;
+            const exists = pl.songs.some(s => (s.id || s.videoId) === songId);
+            if (!exists) {
+              pl.songs.unshift(song);
+              saveDatabase();
+            }
+            return sendJson(res, 200, { success: true, alreadyInPlaylist: exists, playlist: pl });
+          }
+
+          if (action === 'remove' && body.songId) {
+            const sid = String(body.songId);
+            pl.songs = pl.songs.filter(s => String(s.id || s.videoId) !== sid);
+            saveDatabase();
+            return sendJson(res, 200, { success: true, playlist: pl });
+          }
+
+          return sendJson(res, 200, { success: true, playlist: pl });
+        }
+
+        // 4. DELETE Playlist
+        if (req.method === 'DELETE') {
+          const plId = parsedUrl.searchParams.get('id');
+          const plName = (parsedUrl.searchParams.get('name') || '').trim().toLowerCase();
+
+          memoryDb.playlists[userId] = memoryDb.playlists[userId].filter(p => {
+            const matchesId = plId && String(p.id || p._id) === String(plId);
+            const matchesName = plName && String(p.name || '').trim().toLowerCase() === plName;
+            return !(matchesId || matchesName);
+          });
+          saveDatabase();
+          return sendJson(res, 200, { success: true, message: 'Playlist deleted successfully' });
         }
       }
 
-            // User Music Taste Observation & Recommendation Feed API
       if (pathname === '/api/user/taste') {
         if (!memoryDb.userTastes) memoryDb.userTastes = {};
         if (req.method === 'POST') {

@@ -29,6 +29,16 @@
       "avatar": "/avatars/p3.jpg",
       "authProvider": "google_verified_password_set",
       "createdAt": "2026-11-14T20:08:51.501Z"
+    },
+    {
+      "_id": "user_1794771550624",
+      "id": "user_1794771550624",
+      "name": "Test User",
+      "email": "testuser@gmail.com",
+      "passwordHash": "0cb3b1b7651e7eb6b4d315d7a5d2f0e3773f1a83c62a9d4e98bec64b9e417943",
+      "avatar": "/avatars/p1.jpg",
+      "authProvider": "google_oauth_consent",
+      "createdAt": "2026-11-15T19:39:10.628Z"
     }
   ],
   "playlists": {},
@@ -145,6 +155,72 @@
           {
             "time": 56,
             "text": "Akhan vich surma te koka vi sunhera"
+          }
+        ]
+      }
+    ],
+    "user_1794771550624": [
+      {
+        "rank": 1,
+        "id": "yt_ufCaQrNCUC4",
+        "streamUrl": "https://aac.saavncdn.com/089/64beffa430e4c948223ec6bfcc3a13f0_320.mp4",
+        "name": "Winning Speech",
+        "artist": "Karan Aujla",
+        "album": "Four Me EP",
+        "duration": 215,
+        "url": "/api/yt/stream?id=ufCaQrNCUC4&q=Winning+Speech+Karan+Aujla",
+        "image": "https://i.ytimg.com/vi/ufCaQrNCUC4/hqdefault.jpg",
+        "genre": "Punjabi",
+        "year": "2024",
+        "source": "AuraMusic HD",
+        "lyrics": [
+          {
+            "time": 4,
+            "text": "Yeah! Karan Aujla!"
+          },
+          {
+            "time": 10,
+            "text": "Sau gallan di ikko gall ae"
+          },
+          {
+            "time": 16,
+            "text": "Kayi kehnde ne kismat chaldi"
+          },
+          {
+            "time": 22,
+            "text": "Kayi kehnde ne mehnat chaldi"
+          },
+          {
+            "time": 28,
+            "text": "Main keha dohaan da hi roll ae"
+          },
+          {
+            "time": 35,
+            "text": "Par niyat saaf honi chahidi"
+          },
+          {
+            "time": 42,
+            "text": "Winning speech taan har koyi dinda"
+          },
+          {
+            "time": 49,
+            "text": "Par haar ke khadna aunda ni kise nu"
+          },
+          {
+            "time": 58,
+            "text": "Assi taan jatt hege aan, jithe khadiye othe gaddi khad di"
+          },
+          {
+            "time": 68,
+            "text": "Lokaan di gallan te dhyan ni ditta kade"
+          },
+          {
+            "time": 78,
+            "text": "Apne dum te banaya mukaam saara"
+          },
+          {
+            "time": 88,
+            "text": "Geetan di machine kehnde duniya saari!"
           }
         ]
       }
