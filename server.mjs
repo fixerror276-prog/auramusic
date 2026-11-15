@@ -7,6 +7,7 @@ import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
+import { resolveAudio, diagnose, getClientIp } from './audio_sources.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -765,6 +766,13 @@ async function searchYouTube(query) {
         return sendJson(res, 200, { plainLyrics: 'Lyrics unavailable.' });
       }
 
+      // Open /api/yt/diag?id=<videoId> in a browser to see which audio source works on this host.
+      if (pathname === '/api/yt/diag') {
+        const id = (parsedUrl.searchParams.get('id') || 'dQw4w9WgXcQ').replace(/^yt_|^yt-/, '').trim();
+        const report = await diagnose(ytAudioClient, id, getClientIp(req));
+        return sendJson(res, 200, report);
+      }
+
       if (pathname === '/api/yt/stream') {
         const id = parsedUrl.searchParams.get('id') || '';
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
@@ -772,13 +780,11 @@ async function searchYouTube(query) {
 
         // json=1 mode: return stream URL for client-side playback
         if (parsedUrl.searchParams.get('json') === '1') {
-          try {
-            const info = await ytAudioClient.getInfo(`https://www.youtube.com/watch?v=${cleanId}`);
-            const audioFmt = info.formats
-              .filter(f => f.hasAudio && !f.hasVideo)
-              .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
-            if (audioFmt?.url) return sendJson(res, 200, { streamUrl: audioFmt.url });
-          } catch {}
+          // Cached, checked against the client's IP, with Piped/Invidious fallbacks.
+          const result = await resolveAudio(ytAudioClient, cleanId, getClientIp(req));
+          if (result?.streamUrl) {
+            return sendJson(res, 200, { streamUrl: result.streamUrl, source: result.source });
+          }
           return sendJson(res, 404, { error: 'Stream not found' });
         }
 
