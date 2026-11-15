@@ -258,6 +258,20 @@ const server = http.createServer(async (req, res) => {
         console.log(`Brevo SMTP Real Delivery: ${brevoDelivered ? 'DELIVERED TO INBOX' : 'SMTP FAILED (' + deliveryError + ')'}`);
         console.log(`======================================================\n`);
 
+        // If the email could not be sent, tell the user the real reason instead of
+        // pretending it worked. (Set DEV_OTP_CONSOLE=1 to keep the old behaviour of
+        // reading the OTP from the server console during local development.)
+        if (!brevoDelivered && process.env.DEV_OTP_CONSOLE !== '1') {
+          delete memoryDb.pendingRegistrations[email];
+          memoryDb.rateLimits[email].pop();
+          return sendJson(res, 502, {
+            status: 'error',
+            message: `Email could not be sent: ${deliveryError}`,
+            delivered: false,
+            smtpError: deliveryError
+          });
+        }
+
         return sendJson(res, 200, {
           status: 'success',
           message: brevoDelivered 
@@ -495,6 +509,16 @@ const server = http.createServer(async (req, res) => {
         } catch (err) {
           smtpError = err.message;
           console.error('[BREVO FORGOT PASS ERROR]:', smtpError);
+        }
+
+        if (!delivered && process.env.DEV_OTP_CONSOLE !== '1') {
+          delete memoryDb.pendingRegistrations['reset_' + email];
+          return sendJson(res, 502, {
+            status: 'error',
+            message: 'Email could not be sent: ' + smtpError,
+            delivered: false,
+            smtpError
+          });
         }
 
         return sendJson(res, 200, {
