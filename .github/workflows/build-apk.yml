@@ -38,7 +38,7 @@ jobs:
 
       - name: Build signed APK
         working-directory: android
-        run: gradle assembleRelease -PappUrl="${{ steps.url.outputs.url }}" -PversionCode=${{ github.run_number }}
+        run: gradle assembleRelease -PappUrl="${{ steps.url.outputs.url }}" -PbuildNumber=${{ github.run_number }}
 
       - uses: actions/upload-artifact@v4
         with:

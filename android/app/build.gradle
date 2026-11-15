@@ -3,6 +3,7 @@ plugins {
 }
 
 def appUrl = (project.findProperty('appUrl') ?: '').toString().trim()
+def buildNumber = Integer.parseInt((project.findProperty('buildNumber') ?: '1').toString())
 
 android {
     namespace 'com.auramusic.app'
@@ -12,7 +13,7 @@ android {
         applicationId 'com.auramusic.app'
         minSdk 24
         targetSdk 34
-        versionCode (project.findProperty('versionCode') ?: '1').toString().toInteger()
+        versionCode = buildNumber
         versionName '1.0'
         buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
     }
