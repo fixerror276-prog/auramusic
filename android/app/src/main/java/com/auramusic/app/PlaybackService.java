@@ -206,15 +206,13 @@ public class PlaybackService extends Service {
                 .setVisibility(Notification.VISIBILITY_PUBLIC);
         if (cover != null) b.setLargeIcon(cover);
 
-        if (hasTrack) {
-            b.addAction(action(android.R.drawable.ic_media_previous, "Previous", ACTION_PREV, 1));
-            if (playing) b.addAction(action(android.R.drawable.ic_media_pause, "Pause", ACTION_PAUSE, 2));
-            else b.addAction(action(android.R.drawable.ic_media_play, "Play", ACTION_PLAY, 3));
-            b.addAction(action(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 4));
-            b.setStyle(new Notification.MediaStyle()
-                    .setMediaSession(session.getSessionToken())
-                    .setShowActionsInCompactView(0, 1, 2));
-        }
+        b.addAction(action(android.R.drawable.ic_media_previous, "Previous", ACTION_PREV, 1));
+        if (playing) b.addAction(action(android.R.drawable.ic_media_pause, "Pause", ACTION_PAUSE, 2));
+        else b.addAction(action(android.R.drawable.ic_media_play, "Play", ACTION_PLAY, 3));
+        b.addAction(action(android.R.drawable.ic_media_next, "Next", ACTION_NEXT, 4));
+        b.setStyle(new Notification.MediaStyle()
+                .setMediaSession(session.getSessionToken())
+                .setShowActionsInCompactView(0, 1, 2));
         return b.build();
     }
 

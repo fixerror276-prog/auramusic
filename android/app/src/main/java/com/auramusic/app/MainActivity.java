@@ -22,10 +22,15 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
@@ -73,6 +78,10 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        // Fit every phone: ignore the system font-size setting and pinch-zoom, which break the layout.
+        s.setTextZoom(100);
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -136,6 +145,19 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+
+        // Run the bridge before the site's own scripts, so nothing it publishes is missed.
+        try {
+            Uri base = Uri.parse(BuildConfig.APP_URL);
+            if (base.getScheme() != null && base.getHost() != null
+                    && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                String origin = base.getScheme() + "://" + base.getHost()
+                        + (base.getPort() != -1 ? ":" + base.getPort() : "");
+                Set<String> origins = new HashSet<>();
+                origins.add(origin);
+                WebViewCompat.addDocumentStartJavaScript(webView, BridgeScript.JS, origins);
+            }
+        } catch (Exception ignored) { }
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
