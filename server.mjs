@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
+import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,6 +75,9 @@ function loadDatabase() {
 
 const dbData = loadDatabase();
 function saveDatabase() {
+  // With Redis enabled the whole state is saved at the end of each API request
+  // (see saveState below); Vercel's filesystem is read-only anyway.
+  if (redisEnabled) return;
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify({
       users: memoryDb.users,
@@ -94,6 +98,45 @@ const memoryDb = {
   playlists: dbData.playlists || {},
   likes: dbData.likes || {}
 };
+
+// --- Optional Redis persistence (Upstash / Vercel KV) ---
+// Serverless hosts like Vercel forget process memory between requests, which would
+// lose users, login sessions and pending OTPs. When Redis env vars are set, the
+// whole state is loaded at the start of each API request and saved before the
+// response is sent (only if something changed).
+const STATE_KEY = 'auramusic:state:v1';
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes'];
+
+function snapshotState() {
+  return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
+}
+
+async function loadState() {
+  const saved = await kvGetJson(STATE_KEY);
+  // Nothing stored yet: keep what was seeded from database.json (first run).
+  if (saved) {
+    for (const f of STATE_FIELDS) {
+      if (saved[f] !== undefined) memoryDb[f] = saved[f];
+    }
+  }
+  const now = Date.now();
+  for (const [token, s] of Object.entries(memoryDb.activeSessions)) {
+    if (!s || s.expiresAt <= now) delete memoryDb.activeSessions[token];
+  }
+  // Keep expired OTPs a few minutes so the user still gets the "expired" message.
+  for (const [key, p] of Object.entries(memoryDb.pendingRegistrations)) {
+    if (!p || p.expiresAt + 5 * 60 * 1000 <= now) delete memoryDb.pendingRegistrations[key];
+  }
+  for (const [key, list] of Object.entries(memoryDb.rateLimits)) {
+    memoryDb.rateLimits[key] = (list || []).filter(ts => now - ts < 5 * 60 * 1000);
+    if (memoryDb.rateLimits[key].length === 0) delete memoryDb.rateLimits[key];
+  }
+}
+
+async function saveState(before) {
+  const after = JSON.stringify(snapshotState());
+  if (after !== before) await kvSetRaw(STATE_KEY, after);
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -149,6 +192,22 @@ const server = http.createServer(async (req, res) => {
 
   // --- API Routes ---
   if (pathname.startsWith('/api/')) {
+    if (redisEnabled && !pathname.startsWith('/api/yt/')) {
+      try {
+        await loadState();
+      } catch (e) {
+        console.error('[STORE] load failed:', e.message);
+        return sendJson(res, 503, { status: 'error', message: 'Storage unavailable: ' + e.message });
+      }
+      const before = JSON.stringify(snapshotState());
+      const originalEnd = res.end.bind(res);
+      res.end = (...args) => {
+        saveState(before)
+          .catch(e => console.error('[STORE] save failed:', e.message))
+          .finally(() => originalEnd(...args));
+        return res;
+      };
+    }
     try {
       // 1. Send OTP for Registration using Brevo SMTP
       if ((pathname === '/api/v1/auth/register/send-otp' || pathname === '/api/auth/register/send-otp') && req.method === 'POST') {
