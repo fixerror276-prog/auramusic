@@ -667,10 +667,14 @@ function titleKey(title) {
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
+// Same song = the first words of the titles match (the rest is "Official Video", artist, "Lofi mix"...).
 function sameSong(a, b) {
-  const x = titleKey(a), y = titleKey(b);
-  if (!x || !y) return false;
-  return x === y || (x.length >= 5 && y.length >= 5 && (x.includes(y) || y.includes(x)));
+  const x = titleKey(a).split(' ').filter(Boolean);
+  const y = titleKey(b).split(' ').filter(Boolean);
+  if (!x.length || !y.length) return false;
+  const n = Math.min(x.length, y.length, 3);
+  for (let i = 0; i < n; i++) if (x[i] !== y[i]) return false;
+  return n >= 2 || x[0].length >= 4;
 }
 
 // Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)

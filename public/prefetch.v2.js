@@ -40,14 +40,30 @@
       .replace(/[^\p{L}\p{N}]+/gu, ' ')
       .trim();
   }
+  // Same song = the first words of the titles match (the rest is "Official Video", artist, "Lofi mix"...).
   function same(a, b) {
-    var x = key(a), y = key(b);
-    if (!x || !y) return false;
-    return x === y || (x.length >= 5 && y.length >= 5 && (x.indexOf(y) > -1 || y.indexOf(x) > -1));
+    var x = key(a).split(' ').filter(Boolean);
+    var y = key(b).split(' ').filter(Boolean);
+    if (!x.length || !y.length) return false;
+    var n = Math.min(x.length, y.length, 3);
+    for (var i = 0; i < n; i++) if (x[i] !== y[i]) return false;
+    return n >= 2 || x[0].length >= 4;
   }
   var videoId = function (s) { return s.videoId || String(s.id || '').replace(/^yt_|^yt-/, ''); };
 
   window.__auraRelated = {
+    same: same,
+    // fetch related songs for `cur`; ok(list) when there are some, fail() otherwise
+    playRelated: function (cur, ok, fail) {
+      fetch('/api/yt/related?id=' + encodeURIComponent(videoId(cur)) +
+            '&title=' + encodeURIComponent(cur.name || '') +
+            '&artist=' + encodeURIComponent(cur.artist || ''))
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (list) {
+          if (Array.isArray(list) && list.length) ok(list); else fail();
+        })
+        .catch(function () { fail(); });
+    },
     // true when the queue holds two or more other versions of the song that was tapped
     needs: function (cur, list) {
       var n = 0;
