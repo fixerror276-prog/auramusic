@@ -643,7 +643,7 @@
           error_callback: (err) => {
             console.warn('Google GIS Error:', err);
             // Fallback to seamless account picker modal if GIS popup blocked or not authorized
-            renderModal('google-picker');
+            if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
           }
         });
         tokenClient.requestAccessToken({ prompt: 'select_account' });
@@ -699,7 +699,7 @@
     }
 
     // Fallback if GIS client script is still loading or offline
-    renderModal('google-picker');
+    if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
   }
 
   
@@ -770,9 +770,7 @@
   };
 
   
-  window.__fallbackToWebGIS = function() {
-    renderModal('google-picker');
-  };
+  window.__fallbackToWebGIS = function() {};
 
   let resendCountdown = 30;
   let countdownTimer = null;
@@ -1265,7 +1263,7 @@
     if (backLink) {
       backLink.onclick = (e) => {
         e.preventDefault();
-        if (currentMode === 'google-consent' || currentMode === 'google-password' || currentMode === 'google-otp') renderModal('google-picker');
+        if (currentMode === 'google-consent' || currentMode === 'google-password' || currentMode === 'google-otp') if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
         else if (currentMode === 'google-set-password') renderModal('google-otp');
         else if (currentMode === 'google-picker') renderModal('login');
         else if (currentMode === 'forgot-verify') renderModal('forgot-request');
@@ -1590,14 +1588,14 @@
       if (pillBackBtn) {
         pillBackBtn.onclick = (e) => {
           e.preventDefault();
-          renderModal('google-picker');
+          if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
         };
       }
 
       if (cancelBtn) {
         cancelBtn.onclick = (e) => {
           e.preventDefault();
-          renderModal('google-picker');
+          if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
         };
       }
 

@@ -90,7 +90,6 @@ public class MainActivity extends Activity {
         setContentView(webView);
 
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken("254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com")
                 .requestEmail()
                 .requestProfile()
                 .build();
@@ -280,9 +279,7 @@ public class MainActivity extends Activity {
                     webView.post(() -> webView.evaluateJavascript(js, null));
                 }
             } catch (Exception e) {
-                if (webView != null) {
-                    webView.post(() -> webView.evaluateJavascript("window.__fallbackToWebGIS&&window.__fallbackToWebGIS();", null));
-                }
+                android.util.Log.e("AuraMusicAuth", "Google sign-in result error", e);
             }
         }
     }
