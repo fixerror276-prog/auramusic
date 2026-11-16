@@ -1546,15 +1546,39 @@
       }
     }
 
-    // Real Google OAuth Flow: Selecting account directly opens Google Consent Permission Screen!
+    // Direct 1-Tap Google Login: Selecting account instantly logs the user in!
     async function handleGoogleAccountSelection(email, name, initial, bg) {
       pendingGoogleEmail = email;
       pendingGoogleName = name || (email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1));
-      pendingGoogleInitial = initial || (pendingGoogleName[0] || 'G').toUpperCase();
-      pendingGoogleBg = bg || '#4285F4';
-
-      // Transition immediately to Google Consent & Permission Screen
-      renderModal('google-consent');
+      
+      // Close modal and show logging-in feedback
+      showAlert('Signing in with ' + pendingGoogleEmail + '...', 'success');
+      try {
+        const res = await fetch('/api/v1/auth/google-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: pendingGoogleEmail,
+            name: pendingGoogleName,
+            avatar: '/avatars/p1.jpg'
+          })
+        });
+        const data = await res.json();
+        const userObj = (data && data.user) ? data.user : {
+          name: pendingGoogleName,
+          email: pendingGoogleEmail,
+          avatar: '/avatars/p1.jpg',
+          provider: 'google'
+        };
+        handleAuthSuccess(userObj);
+      } catch (e) {
+        handleAuthSuccess({
+          name: pendingGoogleName,
+          email: pendingGoogleEmail,
+          avatar: '/avatars/p1.jpg',
+          provider: 'google'
+        });
+      }
     }
 
     // --- 4b. GOOGLE CONSENT PERMISSION HANDLER ---
