@@ -736,15 +736,21 @@
   }
 
   async function triggerGoogleGIS() {
-    // Exact same official Web Google OAuth flow across both Web & Android APK:
-    // Opens the genuine Google consent screen showing:
-    // "Sign in to auramusic-5tt5.vercel.app"
-    // "Google will allow auramusic-5tt5.vercel.app to access this info about you"
-    // with your profile picture, name, email and the "Continue" button!
+    // Android app: open the phone's own Google account list (it shows every account on the phone).
+    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
+      try {
+        showAlert('Opening Google Accounts on your phone...', 'success');
+        window.AuraNative.requestNativeGoogleSignIn();
+        return;
+      } catch (e) {
+        console.warn('Native Google sign-in trigger error:', e);
+      }
+    }
+
+    // Web browser: Google Identity Services popup.
     await triggerWebGISFlow();
   }
 
-  
   // Check if returning from Google OAuth redirect (access_token in URL hash)
   try {
     if (window.location.hash && window.location.hash.includes('access_token=')) {
@@ -804,17 +810,52 @@
   } catch (e) {}
 
   
-  // Native APK Auth Callback Handler (Deep link return or Play Services result)
-  window.__handleNativeAuthCallback = function(userData) {
-    if (userData && userData.email) {
-      handleAuthSuccess(userData);
+  // Native APK Auth Callback Handler: the app passes the account the user picked on the phone.
+  // We register/login it on the server (so it gets a real account) and then open the app.
+  let nativeAuthBusy = false;
+  window.__handleNativeAuthCallback = async function(userData) {
+    if (!userData || !userData.email) {
+      showAlert('Could not read the selected Google account. Please try again.', 'error');
+      return;
     }
+    if (nativeAuthBusy) return;
+    nativeAuthBusy = true;
+    showAlert('Signing in as ' + userData.email + '...', 'success');
+    let userObj = userData;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch('/api/v1/auth/google-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: userData.email,
+          name: userData.name,
+          avatar: userData.avatar
+        }),
+        signal: ctrl.signal
+      });
+      clearTimeout(timer);
+      const data = await res.json().catch(() => null);
+      if (data && data.user) userObj = { ...userData, ...data.user, provider: 'google' };
+    } catch (e) {
+      // Server unreachable: still let the user in with the account they picked.
+      console.warn('google-login request failed, continuing locally:', e);
+    }
+    nativeAuthBusy = false;
+    handleAuthSuccess(userObj);
   };
 
-  // If native Play Services sign in fails (e.g. SHA-1 unconfigured in Play console), fallback seamlessly to Web GIS
+  // Shown when the phone-side sign-in fails or is cancelled.
+  window.__nativeAuthError = function(message) {
+    nativeAuthBusy = false;
+    showAlert(message || 'Google sign-in failed. Please try again.', 'error');
+  };
+
+  // Kept for older app builds that still call this.
   window.__fallbackToWebGIS = function(errMsg) {
-    console.warn('Native Google Play Services fallback:', errMsg);
-    triggerWebGISFlow();
+    console.warn('Native Google sign-in failed:', errMsg);
+    window.__nativeAuthError('Google sign-in failed' + (errMsg ? ' (' + errMsg + ')' : '') + '. Please update the AuraMusic app and try again.');
   };
 
   let resendCountdown = 30;

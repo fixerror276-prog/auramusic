@@ -1,6 +1,7 @@
 package com.auramusic.app;
 
 import android.Manifest;
+import android.accounts.AccountManager;
 import android.app.Activity;
 import android.app.Dialog;
 import android.view.ViewGroup;
@@ -16,6 +17,7 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.View;
+import android.widget.Toast;
 import android.webkit.CookieManager;
 import android.webkit.MimeTypeMap;
 import android.webkit.WebChromeClient;
@@ -46,6 +48,7 @@ import com.google.android.gms.tasks.Task;
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
     private static final int RC_SIGN_IN = 9001;
+    private static final int RC_PICK_ACCOUNT = 9002;
     private GoogleSignInClient googleSignInClient;
     private static MainActivity current;
     public static MainActivity getInstance() { return current; }
@@ -251,39 +254,120 @@ public class MainActivity extends Activity {
     }
 
     public void launchGoogleSignInPrompt() {
-        if (googleSignInClient != null) {
-            // Sign out first so Google always shows all accounts logged in on the device
-            googleSignInClient.signOut().addOnCompleteListener(this, task -> {
-                Intent signInIntent = googleSignInClient.getSignInIntent();
-                startActivityForResult(signInIntent, RC_SIGN_IN);
-            });
+        if (googleSignInClient == null) {
+            launchAccountPicker("Google sign-in is not ready");
+            return;
         }
+        try {
+            // Sign out first so Google always lists every account on the device.
+            googleSignInClient.signOut().addOnCompleteListener(this, task -> {
+                try {
+                    startActivityForResult(googleSignInClient.getSignInIntent(), RC_SIGN_IN);
+                } catch (Exception e) {
+                    android.util.Log.e("AuraMusicAuth", "Could not open Google sign-in", e);
+                    launchAccountPicker("Could not open Google sign-in");
+                }
+            });
+        } catch (Exception e) {
+            android.util.Log.e("AuraMusicAuth", "Google sign-in start failed", e);
+            launchAccountPicker("Google sign-in start failed");
+        }
+    }
+
+    // Plain Android account chooser (no OAuth client / SHA-1 setup needed). It lists every Google
+    // account on the phone and returns the one the user taps. Used when Google Sign-In fails.
+    @SuppressWarnings("deprecation")
+    private void launchAccountPicker(String reason) {
+        android.util.Log.w("AuraMusicAuth", "Using phone account picker: " + reason);
+        try {
+            Intent pick = AccountManager.newChooseAccountIntent(
+                    null, null, new String[]{"com.google"}, false, null, null, null, null);
+            startActivityForResult(pick, RC_PICK_ACCOUNT);
+        } catch (Exception e) {
+            android.util.Log.e("AuraMusicAuth", "Account picker failed", e);
+            sendAuthError("Could not open the Google account list on this phone.");
+        }
+    }
+
+    private void sendAuthUser(JSONObject user) {
+        if (webView == null) return;
+        final String js = "window.__handleNativeAuthCallback&&window.__handleNativeAuthCallback("
+                + user.toString() + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    private void sendAuthError(String message) {
+        if (webView == null) return;
+        final String js = "window.__nativeAuthError&&window.__nativeAuthError(" + JSONObject.quote(message) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    private static String nameFromEmail(String email) {
+        String local = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+        local = local.replaceAll("[._\\-]+", " ").replaceAll("\\d+$", "").trim();
+        if (local.isEmpty()) return "Google User";
+        StringBuilder sb = new StringBuilder();
+        for (String part : local.split("\\s+")) {
+            if (part.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+        }
+        return sb.length() > 0 ? sb.toString() : "Google User";
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
         if (requestCode == RC_SIGN_IN) {
             Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
             try {
                 GoogleSignInAccount account = task.getResult(ApiException.class);
-                if (account != null && webView != null) {
-                    JSONObject user = new JSONObject();
-                    user.put("id", account.getId() != null ? account.getId() : "user_" + System.currentTimeMillis());
-                    user.put("name", account.getDisplayName() != null ? account.getDisplayName() : "Google User");
-                    user.put("email", account.getEmail() != null ? account.getEmail() : "");
-                    user.put("avatar", account.getPhotoUrl() != null ? account.getPhotoUrl().toString() : "/avatars/p1.jpg");
-                    user.put("provider", "google");
-
-                    final String js = "window.__handleNativeAuthCallback&&window.__handleNativeAuthCallback(" + user.toString() + ");";
-                    webView.post(() -> webView.evaluateJavascript(js, null));
+                if (account == null || account.getEmail() == null) {
+                    launchAccountPicker("Google returned no account");
+                    return;
+                }
+                JSONObject user = new JSONObject();
+                user.put("id", account.getId() != null ? account.getId() : "user_" + System.currentTimeMillis());
+                user.put("name", account.getDisplayName() != null ? account.getDisplayName() : nameFromEmail(account.getEmail()));
+                user.put("email", account.getEmail());
+                user.put("avatar", account.getPhotoUrl() != null ? account.getPhotoUrl().toString() : "/avatars/p1.jpg");
+                user.put("provider", "google");
+                sendAuthUser(user);
+            } catch (ApiException e) {
+                int code = e.getStatusCode();
+                android.util.Log.e("AuraMusicAuth", "Google sign-in failed, code " + code, e);
+                if (code == 12501) { // user closed the chooser
+                    sendAuthError("Sign-in cancelled.");
+                } else {
+                    // Typically 10 (APK SHA-1 not registered in Google Cloud) or 12500.
+                    Toast.makeText(this, "Google sign-in error " + code + ", using phone accounts", Toast.LENGTH_LONG).show();
+                    launchAccountPicker("ApiException " + code);
                 }
             } catch (Exception e) {
                 android.util.Log.e("AuraMusicAuth", "Google sign-in result error", e);
-                if (webView != null) {
-                    final String fallbackJs = "window.__fallbackToWebGIS&&window.__fallbackToWebGIS('" + e.getMessage() + "');";
-                    webView.post(() -> webView.evaluateJavascript(fallbackJs, null));
-                }
+                launchAccountPicker("Exception " + e.getMessage());
+            }
+            return;
+        }
+
+        if (requestCode == RC_PICK_ACCOUNT) {
+            String email = (resultCode == RESULT_OK && data != null)
+                    ? data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) : null;
+            if (email == null || email.isEmpty()) {
+                sendAuthError("Sign-in cancelled.");
+                return;
+            }
+            try {
+                JSONObject user = new JSONObject();
+                user.put("id", "user_" + email.toLowerCase().hashCode());
+                user.put("name", nameFromEmail(email));
+                user.put("email", email.toLowerCase());
+                user.put("avatar", "/avatars/p1.jpg");
+                user.put("provider", "google");
+                sendAuthUser(user);
+            } catch (Exception e) {
+                sendAuthError("Could not read the selected account.");
             }
         }
     }
