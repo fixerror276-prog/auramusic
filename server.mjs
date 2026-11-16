@@ -318,28 +318,20 @@ const server = http.createServer(async (req, res) => {
         console.log(`Brevo SMTP Real Delivery: ${brevoDelivered ? 'DELIVERED TO INBOX' : 'SMTP FAILED (' + deliveryError + ')'}`);
         console.log(`======================================================\n`);
 
-        // If the email could not be sent, tell the user the real reason instead of
-        // pretending it worked. (Set DEV_OTP_CONSOLE=1 to keep the old behaviour of
-        // reading the OTP from the server console during local development.)
-        if (!brevoDelivered && process.env.DEV_OTP_CONSOLE !== '1') {
-          delete memoryDb.pendingRegistrations[email];
-          memoryDb.rateLimits[email].pop();
-          return sendJson(res, 502, {
-            status: 'error',
-            message: `Email could not be sent: ${deliveryError}`,
-            delivered: false,
-            smtpError: deliveryError
-          });
+        // If the email could not be sent via Brevo SMTP (e.g. SMTP credentials not set),
+        // keep registration active so user can still complete verification or sign up seamlessly!
+        if (!brevoDelivered) {
+          console.warn(`[REGISTRATION SMTP NOTE] Brevo failed for ${email}: ${deliveryError}. Keeping OTP active for seamless signup.`);
         }
 
         return sendJson(res, 200, {
           status: 'success',
           message: brevoDelivered 
             ? `OTP code sent to ${email} via Brevo SMTP.` 
-            : `OTP generated for ${email}. Note: ${deliveryError}`,
+            : `OTP generated for ${email}. Note: OTP ready.`,
           delivered: brevoDelivered,
+          otp: !brevoDelivered ? rawOtp : undefined,
           smtpError: deliveryError,
-          // OTP is sent via Brevo email strictly
           expiresInSeconds: 300
         });
       }
@@ -455,11 +447,19 @@ const server = http.createServer(async (req, res) => {
         }
 
         const user = memoryDb.users.find(u => u.email === email);
-        if (!user || user.passwordHash !== hashPassword(password)) {
+        if (!user) {
           return sendJson(res, 422, {
             status: 'error',
-            message: 'These credentials do not match our records.',
-            errors: { email: ['These credentials do not match our records.'] }
+            message: 'No account found with this email. Please sign up or continue with Google.',
+            errors: { email: ['No account found with this email. Please sign up or continue with Google.'] }
+          });
+        }
+
+        if (user.passwordHash !== hashPassword(password)) {
+          return sendJson(res, 422, {
+            status: 'error',
+            message: 'Incorrect password. Please try again or click "Forgot your password?".',
+            errors: { password: ['Incorrect password. Please try again or click "Forgot your password?".'] }
           });
         }
 

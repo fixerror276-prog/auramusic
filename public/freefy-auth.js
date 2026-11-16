@@ -589,8 +589,53 @@
 
   const GOOGLE_CLIENT_ID = '254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com';
 
+  function ensureGISLoaded() {
+    return new Promise((resolve) => {
+      if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+        return resolve(true);
+      }
+      const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+      if (existing) {
+        let attempts = 0;
+        const interval = setInterval(() => {
+          attempts++;
+          if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            clearInterval(interval);
+            resolve(true);
+          } else if (attempts >= 30) {
+            clearInterval(interval);
+            resolve(false);
+          }
+        }, 100);
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.onload = () => {
+        let attempts = 0;
+        const interval = setInterval(() => {
+          attempts++;
+          if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            clearInterval(interval);
+            resolve(true);
+          } else if (attempts >= 20) {
+            clearInterval(interval);
+            resolve(false);
+          }
+        }, 100);
+      };
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+  }
+
   async function triggerGoogleGIS() {
-    // Exactly like Web: Use Google Identity Services (GIS) initTokenClient popup in both Web & APK!
+    showAlert('Connecting to Google...', 'success');
+    await ensureGISLoaded();
+
+    // Use Google Identity Services (GIS) initTokenClient popup in both Web & APK
     if (window.google && window.google.accounts && window.google.accounts.oauth2) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -600,7 +645,7 @@
           callback: async (tokenResponse) => {
             if (tokenResponse && tokenResponse.access_token) {
               try {
-                // Fetch verified profile from Google UserInfo endpoint
+                showAlert('Signing in with your Google account...', 'success');
                 const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                   headers: { Authorization: 'Bearer ' + tokenResponse.access_token }
                 });
@@ -627,13 +672,13 @@
                 }
               } catch (fetchErr) {
                 console.warn('GIS UserInfo fetch error:', fetchErr);
+                showAlert('Failed to get Google profile info.', 'error');
               }
             }
           },
           error_callback: (err) => {
             console.warn('Google GIS Error:', err);
-            // Fallback to seamless account picker modal if GIS popup blocked or not authorized
-            if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
+            showAlert('Google sign-in was cancelled or encountered an error.', 'error');
           }
         });
         tokenClient.requestAccessToken({ prompt: 'select_account' });
@@ -652,7 +697,6 @@
           callback: async (response) => {
             if (response.credential) {
               try {
-                // Decode JWT
                 const base64Url = response.credential.split('.')[1];
                 const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
                 const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
@@ -688,8 +732,7 @@
       }
     }
 
-    // Fallback if GIS client script is still loading or offline
-    if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
+    showAlert('Google sign-in is initializing. Please tap again in a moment.', 'error');
   }
 
   
@@ -776,11 +819,6 @@
     let cardTitle = 'Sign in to your account';
     if (mode === 'register') cardTitle = 'Create a new account';
     else if (mode === 'otp') cardTitle = 'Confirm Access with OTP';
-    else if (mode === 'google-picker') cardTitle = 'Sign in with Google';
-    else if (mode === 'google-consent') cardTitle = 'Connect your Google Account';
-    else if (mode === 'google-password') cardTitle = 'Enter Password';
-    else if (mode === 'google-otp') cardTitle = 'Verify Email OTP';
-    else if (mode === 'google-set-password') cardTitle = 'Set Account Password';
     else if (mode === 'forgot-request') cardTitle = 'Forgot Password';
     else if (mode === 'forgot-verify') cardTitle = 'Reset Password with OTP';
 
@@ -793,7 +831,7 @@
       <div class="auramusic-card">
         ${isLoggedIn() ? `<button type="button" class="auramusic-close-btn" id="auramusic-close-x">✕</button>` : ``}
 
-        ${['google-picker', 'google-consent', 'google-verify'].includes(mode) ? '' : `<h1 class="auramusic-heading" id="auramusic-card-title">${cardTitle}</h1>`}
+        <h1 class="auramusic-heading" id="auramusic-card-title">${cardTitle}</h1>
 
         ${mode === 'otp' ? `
           <div class="auramusic-subheading">
@@ -801,29 +839,13 @@
           </div>
         ` : ''}
 
-        ${mode === 'google-picker' ? `
-          <div class="auramusic-subheading" style="display: flex; align-items: center; gap: 6px;">
-            <span>to continue to</span> <b style="color: #4285F4;">AuraMusic</b>
-          </div>
-        ` : ''}
+        
 
-        ${mode === 'google-password' ? `
-          <div class="auramusic-subheading">
-            Account found for <b style="color: #fff;">${pendingGoogleEmail}</b>. Enter your password to continue.
-          </div>
-        ` : ''}
+        
 
-        ${mode === 'google-otp' ? `
-          <div class="auramusic-subheading">
-            A 6-digit verification code was dispatched to <b style="color: #fff;">${pendingGoogleEmail}</b>. Enter code below:
-          </div>
-        ` : ''}
+        
 
-        ${mode === 'google-set-password' ? `
-          <div class="auramusic-subheading">
-            Email verified! Now create a secure password for your AuraMusic account (<b style="color: #fff;">${pendingGoogleEmail}</b>).
-          </div>
-        ` : ''}
+        
 
         ${mode === 'forgot-request' ? `
           <div class="auramusic-subheading">
@@ -959,208 +981,6 @@
           </div>
         ` : ''}
 
-        <!-- 4. GOOGLE ACCOUNT CHOOSER (EXACT SOUNDCLOUD VIDEO REPLICATION) -->
-        ${mode === 'google-picker' ? `
-          <div>
-            <div class="google-browser-bar">
-              <div class="google-browser-lock">🔒</div>
-              <div class="google-browser-url">accounts.google.com/v3/signin/identifier</div>
-            </div>
-
-            <div class="google-oauth-top-header">
-              <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-              <span class="google-oauth-top-title">Sign in with Google</span>
-            </div>
-
-            <div class="google-app-badge">
-              <img src="/logo.png" alt="AuraMusic" />
-            </div>
-
-            <h2 class="google-main-title">Choose an account</h2>
-            <div class="google-main-subtitle">to continue to <b style="color: #fe4559; font-weight: 600;">AuraMusic</b></div>
-
-            <div id="google-accounts-list">
-              <!-- Render Accounts List -->
-            </div>
-
-            <div id="google-custom-form" style="display: none; margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px;">
-              <div class="auramusic-input-group">
-                <div class="auramusic-label-row">
-                  <label class="auramusic-label">Your Google Email / Device Email</label>
-                </div>
-                <div class="auramusic-input-wrapper">
-                  <input type="email" id="google-input-email" class="auramusic-input" placeholder="e.g. you@gmail.com" autofocus />
-                </div>
-              </div>
-
-              <div class="auramusic-input-group" style="margin-bottom: 16px;">
-                <div class="auramusic-label-row">
-                  <label class="auramusic-label">Display Name (Optional)</label>
-                </div>
-                <div class="auramusic-input-wrapper">
-                  <input type="text" id="google-input-name" class="auramusic-input" placeholder="e.g. Formwork" />
-                </div>
-              </div>
-
-              <button type="button" class="auramusic-btn-primary" id="google-confirm-custom-btn">
-                <span>Next →</span>
-              </button>
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- 4b. GOOGLE CONSENT & PERMISSION SCREEN (EXACT REPLICATION) -->
-        ${mode === 'google-consent' ? `
-          <div>
-            <div class="google-browser-bar">
-              <div class="google-browser-lock">🔒</div>
-              <div class="google-browser-url">accounts.google.com/signin/oauth/consent</div>
-            </div>
-
-            <div class="google-oauth-top-header">
-              <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-              <span class="google-oauth-top-title">Sign in with Google</span>
-            </div>
-
-            <div class="google-app-badge">
-              <img src="/logo.png" alt="AuraMusic" />
-            </div>
-
-            <h2 class="google-main-title" style="font-size: 24px; margin-bottom: 12px;">Sign in to AuraMusic</h2>
-
-            <div class="google-account-pill" id="google-pill-back-btn" title="Switch Account">
-              <div class="google-pill-avatar" style="background: ${pendingGoogleBg};">${pendingGoogleInitial}</div>
-              <div class="google-pill-email">${pendingGoogleEmail}</div>
-              <div class="google-pill-arrow">▼</div>
-            </div>
-
-            <div class="google-consent-section-title">You'll share this info about you</div>
-
-            <div class="google-share-row">
-              <div class="google-share-icon">👤</div>
-              <div>
-                <div class="google-share-name">${pendingGoogleName}</div>
-                <div class="google-share-desc">Name and profile picture</div>
-              </div>
-            </div>
-
-            <div class="google-share-row">
-              <div class="google-share-icon">✉️</div>
-              <div>
-                <div class="google-share-name">${pendingGoogleEmail}</div>
-                <div class="google-share-desc">Email address</div>
-              </div>
-            </div>
-
-            <div class="google-legal-notice">
-              Review AuraMusic's <a href="#">Privacy Policy</a> and <a href="#">Terms of Service</a>.<br/>
-              You can make changes in your <a href="#">Google Account</a>.<br/>
-              Learn more about <a href="#">Sign in with Google</a>.
-            </div>
-
-            <div class="google-action-buttons-row">
-              <button type="button" class="google-btn-cancel-flat" id="google-consent-cancel-btn">Cancel</button>
-              <button type="button" class="google-btn-continue-pill" id="google-consent-allow-btn">Continue</button>
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- 4c. DEVICE VERIFICATION TRANSITION SCREEN (EXACT SOUNDCLOUD VIDEO REPLICATION) -->
-        ${mode === 'google-verify' ? `
-          <div>
-            <div class="google-browser-bar">
-              <div class="google-browser-lock">🔒</div>
-              <div class="google-browser-url">secure.auramusic.app/verify</div>
-            </div>
-
-            <div class="device-verify-wrapper">
-              <div class="device-verify-circle">✓</div>
-              <h2 class="device-verify-heading">Verifying the device...</h2>
-              <div class="device-verify-sub">The requested content will be available after verification.</div>
-              <div class="auramusic-spinner" style="margin-top: 24px; width: 22px; height: 22px; border-width: 3px;"></div>
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- 5. GOOGLE REGISTERED USER: PASSWORD INPUT -->
-        ${mode === 'google-password' ? `
-          <div>
-            <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #141518; border-radius: 12px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.08);">
-              <div class="google-avatar-circle" style="background: ${pendingGoogleBg};">${pendingGoogleInitial}</div>
-              <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 14px; font-weight: 600; color: #fff;">${pendingGoogleName}</div>
-                <div style="font-size: 12px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis;">${pendingGoogleEmail}</div>
-              </div>
-            </div>
-
-            <div class="auramusic-input-group">
-              <div class="auramusic-label-row">
-                <label class="auramusic-label" for="google-pass-input">Password</label>
-                <a class="auramusic-label-link" id="google-forgot-pass-link">Forgot password?</a>
-              </div>
-              <div class="auramusic-input-wrapper">
-                <input type="password" id="google-pass-input" class="auramusic-input" placeholder="Enter your password" autofocus />
-              </div>
-            </div>
-
-            <button type="button" class="auramusic-btn-primary" id="google-login-pass-btn">
-              <span>Sign In</span>
-            </button>
-          </div>
-        ` : ''}
-
-        <!-- 6. GOOGLE NEW USER: EMAIL OTP VERIFICATION -->
-        ${mode === 'google-otp' ? `
-          <div>
-            <div class="auramusic-label" style="text-align: center; margin-bottom: 8px;">Enter 6-digit confirmation code</div>
-
-            <div class="auramusic-otp-digits-wrapper">
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="0" inputmode="numeric" autofocus />
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="1" inputmode="numeric" />
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="2" inputmode="numeric" />
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="3" inputmode="numeric" />
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="4" inputmode="numeric" />
-              <input type="text" maxlength="1" class="auramusic-otp-digit" data-idx="5" inputmode="numeric" />
-            </div>
-
-            <button type="button" class="auramusic-btn-primary" id="google-otp-submit">
-              <span>Verify Google Email OTP</span>
-            </button>
-
-            <div class="auramusic-resend-row">
-              <span id="aura-timer-label">Resend code in <b>${resendCountdown}s</b></span>
-              <button type="button" class="auramusic-resend-btn" id="aura-resend-btn" disabled>Resend Code</button>
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- 7. GOOGLE NEW USER: SET PASSWORD -->
-        ${mode === 'google-set-password' ? `
-          <div>
-            <div class="auramusic-input-group">
-              <div class="auramusic-label-row">
-                <label class="auramusic-label" for="google-set-pass">Create Account Password</label>
-              </div>
-              <div class="auramusic-input-wrapper">
-                <input type="password" id="google-set-pass" class="auramusic-input" placeholder="At least 5 characters" />
-              </div>
-            </div>
-
-            <div class="auramusic-input-group">
-              <div class="auramusic-label-row">
-                <label class="auramusic-label" for="google-set-pass-confirm">Confirm Password</label>
-              </div>
-              <div class="auramusic-input-wrapper">
-                <input type="password" id="google-set-pass-confirm" class="auramusic-input" placeholder="••••••••" />
-              </div>
-            </div>
-
-            <button type="button" class="auramusic-btn-primary" id="google-finish-account-btn">
-              <span>Create AuraMusic Account & Sign In</span>
-            </button>
-          </div>
-        ` : ''}
-
         <!-- 8. FORGOT PASSWORD: ENTER EMAIL -->
         ${mode === 'forgot-request' ? `
           <div>
@@ -1253,11 +1073,7 @@
     if (backLink) {
       backLink.onclick = (e) => {
         e.preventDefault();
-        if (currentMode === 'google-consent' || currentMode === 'google-password' || currentMode === 'google-otp') if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
-        else if (currentMode === 'google-set-password') renderModal('google-otp');
-        else if (currentMode === 'google-picker') renderModal('login');
-        else if (currentMode === 'forgot-verify') renderModal('forgot-request');
-        else if (currentMode === 'forgot-request') renderModal('login');
+        if (currentMode === 'forgot-verify') renderModal('forgot-request');
         else renderModal('login');
       };
     }
@@ -1447,325 +1263,6 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: pendingEmail, password: pendingPassword, password_confirmation: pendingPassword })
       }), 'otp');
-    }
-
-    // --- 4. GOOGLE ACCOUNT CHOOSER ---
-    if (mode === 'google-picker') {
-      const listContainer = document.getElementById('google-accounts-list');
-      const customForm = document.getElementById('google-custom-form');
-
-      // Only accounts this user actually signed in with on this device are listed.
-      // (Previously three hardcoded Gmail accounts were always shown for everyone.)
-      let savedAccs = [];
-      try { savedAccs = JSON.parse(localStorage.getItem('auramusic_saved_accounts') || '[]'); } catch {}
-
-      const allAccounts = [];
-      savedAccs.forEach(s => {
-        // filter out unwanted dummy names
-        if (s.email && !s.email.includes('freefy') && !s.email.includes('admin@admin') && !allAccounts.some(a => a.email.toLowerCase() === s.email.toLowerCase())) {
-          allAccounts.push({
-            name: s.name || s.email.split('@')[0],
-            email: s.email,
-            bg: '#4285F4',
-            initial: (s.name || s.email)[0].toUpperCase()
-          });
-        }
-      });
-
-      listContainer.innerHTML = '';
-
-      // If no accounts cached yet on this browser, allow user to input their Google email or use GIS
-      if (allAccounts.length === 0) {
-        // Leave allAccounts empty so it cleanly prompts 'Use another account' or triggers GIS direct
-      }
-
-      allAccounts.forEach(acc => {
-        const item = document.createElement('div');
-        item.className = 'google-account-item';
-        item.innerHTML = `
-          <div class="google-avatar-circle" style="background: ${acc.bg};">${acc.initial}</div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 15px; font-weight: 500; color: #fff;">${acc.name}</div>
-            <div style="font-size: 13px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis;">${acc.email}</div>
-          </div>
-        `;
-        item.onclick = async () => {
-          await handleGoogleAccountSelection(acc.email, acc.name, acc.initial, acc.bg);
-        };
-        listContainer.appendChild(item);
-      });
-
-      // Use another account
-      const useAnotherItem = document.createElement('div');
-      useAnotherItem.className = 'google-account-item';
-      useAnotherItem.style.marginTop = '10px';
-      useAnotherItem.innerHTML = `
-        <div class="google-avatar-circle" style="background: rgba(255,255,255,0.08); color: #9aa0a6;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        </div>
-        <div style="flex: 1;">
-          <div style="font-size: 14px; font-weight: 600; color: #e8eaed;">Use another account</div>
-        </div>
-        <span style="font-size: 13px; color: #9aa0a6;">+</span>
-      `;
-      useAnotherItem.onclick = () => {
-        customForm.style.display = customForm.style.display === 'none' ? 'block' : 'none';
-        const em = document.getElementById('google-input-email');
-        if (em) em.focus();
-      };
-      listContainer.appendChild(useAnotherItem);
-
-      // No saved accounts on this device: open the email entry form directly.
-      if (allAccounts.length === 0) {
-        customForm.style.display = 'block';
-      }
-
-      const customConfirmBtn = document.getElementById('google-confirm-custom-btn');
-      if (customConfirmBtn) {
-        customConfirmBtn.onclick = async () => {
-          const name = document.getElementById('google-input-name').value.trim();
-          const email = document.getElementById('google-input-email').value.trim();
-          if (!email || !email.includes('@')) {
-            showAlert('Please enter a valid Google email.', 'error');
-            return;
-          }
-          await handleGoogleAccountSelection(email, name || email.split('@')[0], (name || email)[0].toUpperCase(), '#4285F4');
-        };
-      }
-    }
-
-    // Direct 1-Tap Google Login: Selecting account instantly logs the user in!
-    async function handleGoogleAccountSelection(email, name, initial, bg) {
-      pendingGoogleEmail = email;
-      pendingGoogleName = name || (email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1));
-      
-      // Close modal and show logging-in feedback
-      showAlert('Signing in with ' + pendingGoogleEmail + '...', 'success');
-      try {
-        const res = await fetch('/api/v1/auth/google-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: pendingGoogleEmail,
-            name: pendingGoogleName,
-            avatar: '/avatars/p1.jpg'
-          })
-        });
-        const data = await res.json();
-        const userObj = (data && data.user) ? data.user : {
-          name: pendingGoogleName,
-          email: pendingGoogleEmail,
-          avatar: '/avatars/p1.jpg',
-          provider: 'google'
-        };
-        handleAuthSuccess(userObj);
-      } catch (e) {
-        handleAuthSuccess({
-          name: pendingGoogleName,
-          email: pendingGoogleEmail,
-          avatar: '/avatars/p1.jpg',
-          provider: 'google'
-        });
-      }
-    }
-
-    // --- 4b. GOOGLE CONSENT PERMISSION HANDLER ---
-    if (mode === 'google-consent') {
-      const allowBtn = document.getElementById('google-consent-allow-btn');
-      const cancelBtn = document.getElementById('google-consent-cancel-btn');
-      const pillBackBtn = document.getElementById('google-pill-back-btn');
-
-      if (pillBackBtn) {
-        pillBackBtn.onclick = (e) => {
-          e.preventDefault();
-          if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
-        };
-      }
-
-      if (cancelBtn) {
-        cancelBtn.onclick = (e) => {
-          e.preventDefault();
-          if (window.google && window.google.accounts) { try { window.google.accounts.id.prompt(); } catch(e){} }
-        };
-      }
-
-      if (allowBtn) {
-        allowBtn.onclick = async (e) => {
-          e.preventDefault();
-          // Step 1: Transition directly to "Verifying the device..." exactly as shown in video
-          renderModal('google-verify');
-
-          try {
-            const res = await fetch('/api/v1/auth/google-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: pendingGoogleEmail,
-                name: pendingGoogleName,
-                avatar: '/avatars/p1.jpg'
-              })
-            });
-            const data = await res.json();
-            const userObj = (data && data.user) ? data.user : {
-              name: pendingGoogleName,
-              email: pendingGoogleEmail,
-              avatar: '/avatars/p1.jpg',
-              provider: 'google'
-            };
-
-            // Allow the "Verifying the device..." animation to play for 1.2s then complete login
-            setTimeout(() => {
-              handleAuthSuccess(userObj);
-            }, 1200);
-          } catch (err) {
-            setTimeout(() => {
-              handleAuthSuccess({
-                name: pendingGoogleName,
-                email: pendingGoogleEmail,
-                avatar: '/avatars/p1.jpg',
-                provider: 'google'
-              });
-            }, 1000);
-          }
-        };
-      }
-    }
-
-    // --- 5. GOOGLE REGISTERED: PASSWORD SUBMIT ---
-    if (mode === 'google-password') {
-      const googlePassBtn = document.getElementById('google-login-pass-btn');
-      const passInput = document.getElementById('google-pass-input');
-      const forgotPassLink = document.getElementById('google-forgot-pass-link');
-
-      if (forgotPassLink) {
-        forgotPassLink.onclick = async (e) => {
-          e.preventDefault();
-          pendingEmail = pendingGoogleEmail;
-          await sendForgotPasswordOtp(pendingGoogleEmail);
-        };
-      }
-
-      if (googlePassBtn) {
-        googlePassBtn.onclick = async (e) => {
-          e.preventDefault();
-          const pass = passInput.value.trim();
-          if (!pass) {
-            showAlert('Please enter your password.', 'error');
-            return;
-          }
-
-          googlePassBtn.disabled = true;
-          googlePassBtn.innerHTML = `<div class="auramusic-spinner"></div><span>Signing in...</span>`;
-
-          try {
-            const res = await fetch('/api/v1/auth/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: pendingGoogleEmail, password: pass })
-            });
-            const data = await res.json();
-            if (res.ok && data.status === 'success' && data.user) {
-              await handleAuthSuccess(data.user);
-            } else {
-              showAlert(data.message || 'Incorrect password! If you forgot it, click Forgot password.', 'error');
-              googlePassBtn.disabled = false;
-              googlePassBtn.innerHTML = `<span>Sign In</span>`;
-            }
-          } catch (err) {
-            showAlert('Error: ' + err.message, 'error');
-            googlePassBtn.disabled = false;
-            googlePassBtn.innerHTML = `<span>Sign In</span>`;
-          }
-        };
-      }
-    }
-
-    // --- 6. GOOGLE NEW USER: VERIFY OTP ---
-    if (mode === 'google-otp') {
-      setupDigitInputs(async (fullCode) => {
-        const btn = document.getElementById('google-otp-submit');
-        btn.disabled = true;
-        btn.innerHTML = `<div class="auramusic-spinner"></div><span>Verifying code...</span>`;
-
-        try {
-          const res = await fetch('/api/v1/auth/register/verify-otp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: pendingGoogleEmail,
-              code: fullCode,
-              name: pendingGoogleName,
-              provider: 'google'
-            })
-          });
-          const data = await res.json();
-          if (res.ok && data.status === 'success') {
-            showAlert('Email verified! Now set your account password.', 'success');
-            setTimeout(() => renderModal('google-set-password'), 600);
-          } else {
-            showAlert(data.message || 'Invalid or expired OTP!', 'error');
-            btn.disabled = false;
-            btn.innerHTML = `<span>Verify Google Email OTP</span>`;
-            resetDigitInputs();
-          }
-        } catch (err) {
-          showAlert('Error: ' + err.message, 'error');
-          btn.disabled = false;
-          btn.innerHTML = `<span>Verify Google Email OTP</span>`;
-        }
-      });
-
-      const btn = document.getElementById('google-otp-submit');
-      if (btn) {
-        btn.onclick = () => {
-          const code = getDigitInputsCode();
-          if (code.length !== 6) showAlert('Please enter full 6-digit code.', 'error');
-        };
-      }
-
-      setupResendBtn(() => fetch('/api/v1/auth/register/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: pendingGoogleEmail, isGoogleAuth: true })
-      }), 'google-otp');
-    }
-
-    // --- 7. GOOGLE NEW USER: SET PASSWORD ---
-    if (mode === 'google-set-password') {
-      const finishBtn = document.getElementById('google-finish-account-btn');
-      if (finishBtn) {
-        finishBtn.onclick = async (e) => {
-          e.preventDefault();
-          const pass = document.getElementById('google-set-pass').value.trim();
-          const confirm = document.getElementById('google-set-pass-confirm').value.trim();
-
-          if (!pass || pass.length < 5) {
-            showAlert('Password must be at least 5 characters.', 'error');
-            return;
-          }
-          if (pass !== confirm) {
-            showAlert('Passwords do not match.', 'error');
-            return;
-          }
-
-          finishBtn.disabled = true;
-          finishBtn.innerHTML = `<div class="auramusic-spinner"></div><span>Creating account...</span>`;
-
-          try {
-            // Log user in or save user
-            await handleAuthSuccess({
-              name: pendingGoogleName || pendingGoogleEmail.split('@')[0],
-              email: pendingGoogleEmail,
-              avatar: '/avatars/p1.jpg',
-              provider: 'google'
-            });
-          } catch (err) {
-            showAlert('Error: ' + err.message, 'error');
-            finishBtn.disabled = false;
-            finishBtn.innerHTML = `<span>Create AuraMusic Account & Sign In</span>`;
-          }
-        };
-      }
     }
 
     // --- 8. FORGOT PASSWORD: REQUEST OTP ---
