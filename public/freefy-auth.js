@@ -587,7 +587,7 @@
   let pendingGoogleInitial = 'G';
   let pendingGoogleBg = '#4285F4';
 
-  const GOOGLE_CLIENT_ID = '112987395781970833514.apps.googleusercontent.com';
+  const GOOGLE_CLIENT_ID = '254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com';
 
   async function triggerGoogleGIS() {
     // If running in Capacitor/Cordova native app, use native Google Auth if available, else GIS / fallback
