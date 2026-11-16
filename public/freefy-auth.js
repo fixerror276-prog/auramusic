@@ -739,9 +739,26 @@
               // If user arrived here in external browser from Android APK, bounce back into the app!
               if (/android/i.test(navigator.userAgent) && !window.AuraNative) {
                 try {
-                  const deepUrl = 'auramusic://auth?user=' + encodeURIComponent(JSON.stringify(userObj));
-                  window.location.href = deepUrl;
-                } catch(e) {}
+                  const userJson = encodeURIComponent(JSON.stringify(userObj));
+                  // Android Chrome standard Intent URI format (guaranteed to launch the app package or fallback)
+                  const intentUrl = 'intent://auth?user=' + userJson + '#Intent;scheme=auramusic;package=com.auramusic.app;end';
+                  
+                  // Also show a direct one-tap button on page in case browser prevents automatic navigation
+                  const banner = document.createElement('div');
+                  banner.style.cssText = 'position:fixed;inset:0;background:rgba(9,10,15,0.95);z-index:9999999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:sans-serif;';
+                  banner.innerHTML = `
+                    <div style="width:64px;height:64px;border-radius:20px;background:#4285F4;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:20px;">✓</div>
+                    <h2 style="color:#fff;font-size:20px;font-weight:700;margin-bottom:8px;">Signed in as ${userObj.name || userObj.email}</h2>
+                    <p style="color:#9aa0a6;font-size:14px;margin-bottom:24px;">Tap below to return to your AuraMusic App:</p>
+                    <a href="${intentUrl}" style="background:#fe4559;color:#fff;text-decoration:none;padding:14px 28px;border-radius:9999px;font-weight:700;font-size:15px;display:inline-block;box-shadow:0 8px 24px rgba(254,69,89,0.4);">Open AuraMusic App</a>
+                  `;
+                  document.body.appendChild(banner);
+
+                  // Trigger intent navigation
+                  window.location.href = intentUrl;
+                } catch(e) {
+                  console.warn('Intent redirect error:', e);
+                }
               }
             });
           }
