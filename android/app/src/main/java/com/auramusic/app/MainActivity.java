@@ -36,6 +36,7 @@ import java.util.Set;
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
     private static MainActivity current;
+    public static MainActivity getInstance() { return current; }
     private WebView webView;
     private String appHost = "";
 
@@ -194,11 +195,8 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) { }
 
-        if (savedInstanceState != null) {
-            webView.restoreState(savedInstanceState);
-        } else {
-            webView.loadUrl(BuildConfig.APP_URL);
-        }
+        // Always load fresh URL so app reloads cleanly when opened
+        webView.loadUrl(BuildConfig.APP_URL);
     }
 
     @Override
@@ -225,7 +223,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        webView.saveState(outState);
+        // Do not freeze webview state so reopening reloads fresh
     }
 
     @Override

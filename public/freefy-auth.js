@@ -590,7 +590,23 @@
   const GOOGLE_CLIENT_ID = '254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com';
 
   async function triggerGoogleGIS() {
-    // If running in Capacitor/Cordova native app, use native Google Auth if available, else GIS / fallback
+    // If running inside Android APK (AuraNative bridge present), open Google OAuth in system browser (Chrome/Edge) or open seamless Google prompt
+    if (window.AuraNative && typeof window.AuraNative.openSystemGoogleAuth === 'function') {
+      try {
+        const redirectUrl = encodeURIComponent(window.location.origin);
+        const googleAuthUrl = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + GOOGLE_CLIENT_ID +
+          '&redirect_uri=' + redirectUrl +
+          '&response_type=token' +
+          '&scope=email%20profile%20openid' +
+          '&prompt=select_account';
+        window.AuraNative.openSystemGoogleAuth(googleAuthUrl);
+        return;
+      } catch (e) {
+        console.warn('Native Google Auth trigger warn:', e);
+      }
+    }
+
+    // Web / Standard Browser GIS Flow
     if (window.google && window.google.accounts && window.google.accounts.oauth2) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -691,6 +707,41 @@
     // Fallback if GIS client script is still loading or offline
     renderModal('google-picker');
   }
+
+  
+  // Check if returning from Google OAuth redirect (access_token in URL hash)
+  try {
+    if (window.location.hash && window.location.hash.includes('access_token=')) {
+      const params = new URLSearchParams(window.location.hash.substring(1));
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: 'Bearer ' + accessToken }
+        }).then(r => r.json()).then(profile => {
+          if (profile && profile.email) {
+            fetch('/api/v1/auth/google-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: profile.email,
+                name: profile.name || profile.given_name || profile.email.split('@')[0],
+                avatar: profile.picture || '/avatars/p1.jpg'
+              })
+            }).then(r => r.json()).then(data => {
+              const userObj = (data && data.user) ? data.user : {
+                name: profile.name || profile.email.split('@')[0],
+                email: profile.email,
+                avatar: profile.picture || '/avatars/p1.jpg',
+                provider: 'google'
+              };
+              handleAuthSuccess(userObj);
+            });
+          }
+        }).catch(err => console.warn('OAuth token fetch error:', err));
+      }
+    }
+  } catch (e) {}
 
   let resendCountdown = 30;
   let countdownTimer = null;
