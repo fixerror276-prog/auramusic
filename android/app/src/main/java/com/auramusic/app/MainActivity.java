@@ -253,7 +253,16 @@ public class MainActivity extends Activity {
         handleAuthDeepLink(getIntent());
     }
 
+    // The Google-branded chooser needs this APK's SHA-1 registered in Google Cloud (otherwise it fails
+    // with error 10). Until that is done, the app goes straight to the phone's own account list and
+    // the Google-style chooser stays web-only. Set to true once the Android OAuth client exists.
+    private static final boolean USE_GOOGLE_SIGN_IN = false;
+
     public void launchGoogleSignInPrompt() {
+        if (!USE_GOOGLE_SIGN_IN) {
+            launchAccountPicker("direct phone account list");
+            return;
+        }
         if (googleSignInClient == null) {
             launchAccountPicker("Google sign-in is not ready");
             return;
