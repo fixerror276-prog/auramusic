@@ -632,6 +632,19 @@
   }
 
   async function triggerGoogleGIS() {
+    // 1. Android APK environment: Trigger native Google Play Services Account Chooser
+    // This auto-detects ALL Google accounts present on the user's phone directly!
+    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
+      try {
+        showAlert('Opening Google Accounts on your phone...', 'success');
+        window.AuraNative.requestNativeGoogleSignIn();
+        return;
+      } catch (e) {
+        console.warn('Native Google sign-in trigger error:', e);
+      }
+    }
+
+    // 2. Web Browser: Use Google Identity Services (GIS)
     showAlert('Connecting to Google...', 'success');
     await ensureGISLoaded();
 
