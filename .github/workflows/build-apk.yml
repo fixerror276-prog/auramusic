@@ -59,5 +59,7 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk AuraMusic.apk
           gh release delete apk-latest --cleanup-tag -y || true
-          gh release create apk-latest AuraMusic.apk --title "AuraMusic APK" \
+          gh release create apk-latest AuraMusic.apk --title "AuraMusic APK" --latest \
             --notes "Latest Android build (run ${{ github.run_number }}). Download AuraMusic.apk and install it."
+          # The download link on the site only works for a published (non-draft) release.
+          gh release edit apk-latest --draft=false --latest
