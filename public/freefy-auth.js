@@ -736,12 +736,27 @@
                 provider: 'google'
               };
               handleAuthSuccess(userObj);
+              // If user arrived here in external browser from Android APK, bounce back into the app!
+              if (/android/i.test(navigator.userAgent) && !window.AuraNative) {
+                try {
+                  const deepUrl = 'auramusic://auth?user=' + encodeURIComponent(JSON.stringify(userObj));
+                  window.location.href = deepUrl;
+                } catch(e) {}
+              }
             });
           }
         }).catch(err => console.warn('OAuth token fetch error:', err));
       }
     }
   } catch (e) {}
+
+  
+  // Native APK Auth Callback Handler (Deep link return)
+  window.__handleNativeAuthCallback = function(userData) {
+    if (userData && userData.email) {
+      handleAuthSuccess(userData);
+    }
+  };
 
   let resendCountdown = 30;
   let countdownTimer = null;

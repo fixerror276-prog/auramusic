@@ -204,7 +204,30 @@ public class MainActivity extends Activity {
         super.onResume();
         webView.onResume();
         startPlaybackService();
+        handleAuthDeepLink(getIntent());
     }
+
+    private void handleAuthDeepLink(Intent intent) {
+        if (intent == null || intent.getData() == null) return;
+        Uri data = intent.getData();
+        if ("auramusic".equals(data.getScheme()) && "auth".equals(data.getHost())) {
+            String token = data.getQueryParameter("token");
+            String userJson = data.getQueryParameter("user");
+            if (webView != null) {
+                final String js = "window.__handleNativeAuthCallback&&window.__handleNativeAuthCallback("
+                        + (userJson != null ? userJson : "null") + ");";
+                webView.post(() -> webView.evaluateJavascript(js, null));
+            }
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleAuthDeepLink(intent);
+    }
+
 
     // The WebView is deliberately NOT paused here: pausing it is what stops the music when the
     // screen turns off or the app goes to the background. PlaybackService keeps the process alive.
