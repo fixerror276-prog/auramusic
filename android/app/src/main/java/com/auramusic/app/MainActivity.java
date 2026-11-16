@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Message;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.View;
@@ -83,6 +84,10 @@ public class MainActivity extends Activity {
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setSupportMultipleWindows(true);
+        String defaultUa = s.getUserAgentString();
+        s.setUserAgentString(defaultUa.replace("; wv", "").replace("Version/4.0 ", ""));
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -94,7 +99,37 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { }
 
         webView.addJavascriptInterface(new AuraBridge(), "AuraNative");
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                WebView popup = new WebView(MainActivity.this);
+                WebSettings ps = popup.getSettings();
+                ps.setJavaScriptEnabled(true);
+                ps.setDomStorageEnabled(true);
+                ps.setUserAgentString(webView.getSettings().getUserAgentString());
+                CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true);
+
+                popup.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView pView, WebResourceRequest req) {
+                        Uri pUri = req.getUrl();
+                        String pHost = pUri.getHost();
+                        if (pHost != null && pHost.equals(appHost)) {
+                            // Returned to AuraMusic host, close popup and load into main webView
+                            webView.loadUrl(pUri.toString());
+                            popup.destroy();
+                            return true;
+                        }
+                        return false;
+                    }
+                });
+
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(popup);
+                resultMsg.sendToTarget();
+                return true;
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
