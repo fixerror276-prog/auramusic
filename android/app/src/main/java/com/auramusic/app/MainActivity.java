@@ -280,6 +280,10 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception e) {
                 android.util.Log.e("AuraMusicAuth", "Google sign-in result error", e);
+                if (webView != null) {
+                    final String fallbackJs = "window.__fallbackToWebGIS&&window.__fallbackToWebGIS('" + e.getMessage() + "');";
+                    webView.post(() -> webView.evaluateJavascript(fallbackJs, null));
+                }
             }
         }
     }

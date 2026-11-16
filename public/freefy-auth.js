@@ -631,20 +631,7 @@
     });
   }
 
-  async function triggerGoogleGIS() {
-    // 1. Android APK environment: Trigger native Google Play Services Account Chooser
-    // This auto-detects ALL Google accounts present on the user's phone directly!
-    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
-      try {
-        showAlert('Opening Google Accounts on your phone...', 'success');
-        window.AuraNative.requestNativeGoogleSignIn();
-        return;
-      } catch (e) {
-        console.warn('Native Google sign-in trigger error:', e);
-      }
-    }
-
-    // 2. Web Browser: Use Google Identity Services (GIS)
+  async function triggerWebGISFlow() {
     showAlert('Connecting to Google...', 'success');
     await ensureGISLoaded();
 
@@ -748,6 +735,23 @@
     showAlert('Google sign-in is initializing. Please tap again in a moment.', 'error');
   }
 
+  async function triggerGoogleGIS() {
+    // 1. Android APK environment: Trigger native Google Play Services Account Chooser
+    // This auto-detects ALL Google accounts present on the user's phone directly!
+    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
+      try {
+        showAlert('Opening Google Accounts on your phone...', 'success');
+        window.AuraNative.requestNativeGoogleSignIn();
+        return;
+      } catch (e) {
+        console.warn('Native Google sign-in trigger error:', e);
+      }
+    }
+
+    // 2. Web Browser: Use Google Identity Services (GIS)
+    await triggerWebGISFlow();
+  }
+
   
   // Check if returning from Google OAuth redirect (access_token in URL hash)
   try {
@@ -808,15 +812,18 @@
   } catch (e) {}
 
   
-  // Native APK Auth Callback Handler (Deep link return)
+  // Native APK Auth Callback Handler (Deep link return or Play Services result)
   window.__handleNativeAuthCallback = function(userData) {
     if (userData && userData.email) {
       handleAuthSuccess(userData);
     }
   };
 
-  
-  window.__fallbackToWebGIS = function() {};
+  // If native Play Services sign in fails (e.g. SHA-1 unconfigured in Play console), fallback seamlessly to Web GIS
+  window.__fallbackToWebGIS = function(errMsg) {
+    console.warn('Native Google Play Services fallback:', errMsg);
+    triggerWebGISFlow();
+  };
 
   let resendCountdown = 30;
   let countdownTimer = null;
