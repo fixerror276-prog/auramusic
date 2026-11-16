@@ -736,19 +736,11 @@
   }
 
   async function triggerGoogleGIS() {
-    // 1. Android APK environment: Trigger native Google Play Services Account Chooser
-    // This auto-detects ALL Google accounts present on the user's phone directly!
-    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
-      try {
-        showAlert('Opening Google Accounts on your phone...', 'success');
-        window.AuraNative.requestNativeGoogleSignIn();
-        return;
-      } catch (e) {
-        console.warn('Native Google sign-in trigger error:', e);
-      }
-    }
-
-    // 2. Web Browser: Use Google Identity Services (GIS)
+    // Exact same official Web Google OAuth flow across both Web & Android APK:
+    // Opens the genuine Google consent screen showing:
+    // "Sign in to auramusic-5tt5.vercel.app"
+    // "Google will allow auramusic-5tt5.vercel.app to access this info about you"
+    // with your profile picture, name, email and the "Continue" button!
     await triggerWebGISFlow();
   }
 
