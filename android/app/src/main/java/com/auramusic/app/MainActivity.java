@@ -2,6 +2,8 @@ package com.auramusic.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Dialog;
+import android.view.ViewGroup;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -38,6 +40,7 @@ public class MainActivity extends Activity {
     private static MainActivity current;
     public static MainActivity getInstance() { return current; }
     private WebView webView;
+    private Dialog authPopupDialog;
     private String appHost = "";
 
     // Sends a lock-screen / notification button press to the site's own media handlers.
@@ -103,10 +106,17 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                if (authPopupDialog != null && authPopupDialog.isShowing()) {
+                    authPopupDialog.dismiss();
+                }
+
+                authPopupDialog = new Dialog(MainActivity.this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
                 WebView popup = new WebView(MainActivity.this);
                 WebSettings ps = popup.getSettings();
                 ps.setJavaScriptEnabled(true);
                 ps.setDomStorageEnabled(true);
+                ps.setSupportMultipleWindows(true);
+                ps.setJavaScriptCanOpenWindowsAutomatically(true);
                 ps.setUserAgentString(webView.getSettings().getUserAgentString());
                 CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true);
 
@@ -116,14 +126,31 @@ public class MainActivity extends Activity {
                         Uri pUri = req.getUrl();
                         String pHost = pUri.getHost();
                         if (pHost != null && pHost.equals(appHost)) {
-                            // Returned to AuraMusic host, close popup and load into main webView
+                            // Returned to AuraMusic host, dismiss in-app popup dialog and reload in main view
+                            if (authPopupDialog != null && authPopupDialog.isShowing()) {
+                                authPopupDialog.dismiss();
+                                authPopupDialog = null;
+                            }
                             webView.loadUrl(pUri.toString());
-                            popup.destroy();
                             return true;
                         }
                         return false;
                     }
                 });
+
+                popup.setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public void onCloseWindow(WebView window) {
+                        if (authPopupDialog != null && authPopupDialog.isShowing()) {
+                            authPopupDialog.dismiss();
+                            authPopupDialog = null;
+                        }
+                    }
+                });
+
+                authPopupDialog.setContentView(popup, new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                authPopupDialog.show();
 
                 WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
                 transport.setWebView(popup);
@@ -251,6 +278,11 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (authPopupDialog != null && authPopupDialog.isShowing()) {
+            authPopupDialog.dismiss();
+            authPopupDialog = null;
+            return;
+        }
         if (webView.canGoBack()) {
             webView.goBack();
         } else {

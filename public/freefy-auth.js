@@ -590,23 +590,7 @@
   const GOOGLE_CLIENT_ID = '254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com';
 
   async function triggerGoogleGIS() {
-    // If running inside Android APK (AuraNative bridge present), open Google OAuth in system browser (Chrome/Edge) or open seamless Google prompt
-    if (window.AuraNative && typeof window.AuraNative.openSystemGoogleAuth === 'function') {
-      try {
-        const redirectUrl = encodeURIComponent(window.location.origin);
-        const googleAuthUrl = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + GOOGLE_CLIENT_ID +
-          '&redirect_uri=' + redirectUrl +
-          '&response_type=token' +
-          '&scope=email%20profile%20openid' +
-          '&prompt=select_account';
-        window.AuraNative.openSystemGoogleAuth(googleAuthUrl);
-        return;
-      } catch (e) {
-        console.warn('Native Google Auth trigger warn:', e);
-      }
-    }
-
-    // Web / Standard Browser GIS Flow
+    // Unified GIS Flow: Runs in browser AND in APK native in-app popup dialog!
     if (window.google && window.google.accounts && window.google.accounts.oauth2) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
