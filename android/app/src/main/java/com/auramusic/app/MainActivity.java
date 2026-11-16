@@ -34,9 +34,19 @@ import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import org.json.JSONObject;
+
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
+    private static final int RC_SIGN_IN = 9001;
+    private GoogleSignInClient googleSignInClient;
     private static MainActivity current;
     public static MainActivity getInstance() { return current; }
     private WebView webView;
@@ -78,6 +88,13 @@ public class MainActivity extends Activity {
         webView = new KeepAliveWebView(this);
         webView.setBackgroundColor(BG);
         setContentView(webView);
+
+        GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken("254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com")
+                .requestEmail()
+                .requestProfile()
+                .build();
+        googleSignInClient = GoogleSignIn.getClient(this, gso);
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -232,6 +249,42 @@ public class MainActivity extends Activity {
         webView.onResume();
         startPlaybackService();
         handleAuthDeepLink(getIntent());
+    }
+
+    public void launchGoogleSignInPrompt() {
+        if (googleSignInClient != null) {
+            // Sign out first so Google always shows all accounts logged in on the device
+            googleSignInClient.signOut().addOnCompleteListener(this, task -> {
+                Intent signInIntent = googleSignInClient.getSignInIntent();
+                startActivityForResult(signInIntent, RC_SIGN_IN);
+            });
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == RC_SIGN_IN) {
+            Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
+            try {
+                GoogleSignInAccount account = task.getResult(ApiException.class);
+                if (account != null && webView != null) {
+                    JSONObject user = new JSONObject();
+                    user.put("id", account.getId() != null ? account.getId() : "user_" + System.currentTimeMillis());
+                    user.put("name", account.getDisplayName() != null ? account.getDisplayName() : "Google User");
+                    user.put("email", account.getEmail() != null ? account.getEmail() : "");
+                    user.put("avatar", account.getPhotoUrl() != null ? account.getPhotoUrl().toString() : "/avatars/p1.jpg");
+                    user.put("provider", "google");
+
+                    final String js = "window.__handleNativeAuthCallback&&window.__handleNativeAuthCallback(" + user.toString() + ");";
+                    webView.post(() -> webView.evaluateJavascript(js, null));
+                }
+            } catch (Exception e) {
+                if (webView != null) {
+                    webView.post(() -> webView.evaluateJavascript("window.__fallbackToWebGIS&&window.__fallbackToWebGIS();", null));
+                }
+            }
+        }
     }
 
     private void handleAuthDeepLink(Intent intent) {

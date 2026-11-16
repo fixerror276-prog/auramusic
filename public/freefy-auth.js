@@ -590,7 +590,17 @@
   const GOOGLE_CLIENT_ID = '254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com';
 
   async function triggerGoogleGIS() {
-    // Unified GIS Flow: Runs in browser AND in APK native in-app popup dialog!
+    // 1. If running inside Android APK, launch Android's official Google Play Services Account Chooser (bottom sheet with all logged-in phone emails)
+    if (window.AuraNative && typeof window.AuraNative.requestNativeGoogleSignIn === 'function') {
+      try {
+        window.AuraNative.requestNativeGoogleSignIn();
+        return;
+      } catch (e) {
+        console.warn('Native Google Play Services trigger error:', e);
+      }
+    }
+
+    // 2. Web GIS Flow (for Web browsers)
     if (window.google && window.google.accounts && window.google.accounts.oauth2) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -757,6 +767,11 @@
     if (userData && userData.email) {
       handleAuthSuccess(userData);
     }
+  };
+
+  
+  window.__fallbackToWebGIS = function() {
+    renderModal('google-picker');
   };
 
   let resendCountdown = 30;

@@ -1,10 +1,8 @@
 package com.auramusic.app;
 
-import android.content.Intent;
-import android.net.Uri;
 import android.webkit.JavascriptInterface;
 
-// Receives "now playing" updates from the web page and handles native Google Auth / Actions
+// Receives updates from the web page and triggers Android native bottom-sheet Google Account Chooser
 public class AuraBridge {
     private static String clip(String s, int max) {
         if (s == null) return "";
@@ -29,18 +27,13 @@ public class AuraBridge {
         PlaybackService.setPosition(Math.max(0, durationMs), Math.max(0, positionMs));
     }
 
-    // Opens Google OAuth directly in the device's system browser (Chrome/Edge) with full accounts chooser
+    // Opens Android's official One-Tap / Google Play Services Account Chooser
     @JavascriptInterface
-    public void openSystemGoogleAuth(String authUrl) {
-        if (authUrl == null || authUrl.isEmpty()) return;
+    public void requestNativeGoogleSignIn() {
         MainActivity activity = MainActivity.getInstance();
         if (activity != null) {
             activity.runOnUiThread(() -> {
-                try {
-                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    activity.startActivity(intent);
-                } catch (Exception ignored) {}
+                activity.launchGoogleSignInPrompt();
             });
         }
     }
