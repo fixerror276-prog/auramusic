@@ -940,6 +940,127 @@ async function searchYouTube(query) {
         return sendJson(res, 200, picked.slice(0, 20).map(toSong));
       }
 
+      // ============================================================================
+      // Real-Time YouTube Search Suggestions: /api/yt/suggestions?q=query
+      // ============================================================================
+      if (pathname === '/api/yt/suggestions') {
+        const query = (parsedUrl.searchParams.get('q') || '').trim();
+        if (!query) {
+          return sendJson(res, 200, { status: 'success', query: '', suggestions: [] });
+        }
+        try {
+          const ytSuggestUrl = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(query)}`;
+          const suggestRes = await fetch(ytSuggestUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (suggestRes.ok) {
+            const data = await suggestRes.json();
+            const suggestions = Array.isArray(data[1]) ? data[1] : [];
+            return sendJson(res, 200, { status: 'success', query, suggestions });
+          }
+        } catch (e) {
+          console.warn('[SUGGESTIONS ERROR]', e.message);
+        }
+        return sendJson(res, 200, { status: 'success', query, suggestions: [] });
+      }
+
+      // ============================================================================
+      // Smart Music Taste & Auto-Play Recommendations: /api/recommendations?based_on=recent&current_song=xyz
+      // ============================================================================
+      if (pathname === '/api/recommendations') {
+        const currentSongId = (parsedUrl.searchParams.get('current_song') || '').replace(/^yt_/, '').trim();
+        const artist = (parsedUrl.searchParams.get('artist') || '').trim();
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const limit = Math.min(25, parseInt(parsedUrl.searchParams.get('limit') || '15', 10));
+
+        let userTaste = memoryDb.userTastes?.[userId] || null;
+        let dominantArtists = [];
+        let dominantGenres = [];
+
+        if (userTaste) {
+          dominantArtists = Object.entries(userTaste.artists || {})
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(e => e[0]);
+          dominantGenres = Object.entries(userTaste.genres || {})
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(e => e[0]);
+        }
+
+        const toSong = v => ({
+          id: 'yt_' + v.videoId,
+          videoId: v.videoId,
+          name: v.title || v.name,
+          artist: v.artist || 'AuraMusic Artist',
+          album: 'YouTube Music Single',
+          duration: Number(v.duration) || 210,
+          image: v.image || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(v.title || v.name || '')}`,
+          genre: 'Music',
+          source: 'AuraSmart Recommendation'
+        });
+
+        const pool = [];
+        const seenIds = new Set();
+        if (currentSongId) seenIds.add(currentSongId);
+
+        const addItems = items => {
+          for (const item of items) {
+            const vid = item.videoId || (item.id || '').replace(/^yt_/, '');
+            if (!vid || seenIds.has(vid)) continue;
+            seenIds.add(vid);
+            pool.push({
+              videoId: vid,
+              title: item.title || item.name,
+              artist: item.artist,
+              duration: item.duration,
+              image: item.image
+            });
+          }
+        };
+
+        // 1. Direct YouTube Related engine for current song
+        if (currentSongId) {
+          try {
+            const related = await getRelated(ytAudioClient, currentSongId);
+            if (Array.isArray(related)) addItems(related);
+          } catch (_) {}
+        }
+
+        // 2. Blend with User Top Artists from history
+        if (dominantArtists.length > 0 && pool.length < limit) {
+          for (const topArt of dominantArtists.slice(0, 2)) {
+            try {
+              const artistSongs = await searchYouTube(`${topArt} best songs`);
+              addItems(artistSongs);
+            } catch (_) {}
+            if (pool.length >= limit) break;
+          }
+        }
+
+        // 3. Fallback: Trending Hindi & Global chart hits if cold start / empty history
+        if (pool.length < 5) {
+          try {
+            const trendingQuery = artist ? `${artist} songs` : 'Trending songs new 2026';
+            const trendingSongs = await searchYouTube(trendingQuery);
+            addItems(trendingSongs);
+          } catch (_) {}
+        }
+
+        const queue = pool.slice(0, limit).map(toSong);
+
+        return sendJson(res, 200, {
+          status: 'success',
+          based_on: userTaste && dominantArtists.length ? 'recent_taste' : 'trending',
+          taste_context: {
+            topArtists: dominantArtists,
+            topGenres: dominantGenres,
+            isColdStart: !userTaste || !userTaste.history?.length
+          },
+          autoplay_next: queue[0] || null,
+          queue
+        });
+      }
+
       // Open /api/yt/diag?id=<videoId> in a browser to see which audio source works on this host.
       if (pathname === '/api/yt/diag') {
         const id = (parsedUrl.searchParams.get('id') || 'dQw4w9WgXcQ').replace(/^yt_|^yt-/, '').trim();
