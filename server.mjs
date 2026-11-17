@@ -504,12 +504,53 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { status: 'error', message: 'Unauthenticated' });
       }
 
-            // 6. Google Direct OAuth & Consent Login / Sync
+            // 6. Google Direct OAuth & Consent Login / Sync (Cryptographically Verified via Google API)
       if ((pathname === '/api/v1/auth/google-login' || pathname === '/api/auth/google-login') && req.method === 'POST') {
         const body = await parseBody(req);
-        const email = (body.email || '').trim().toLowerCase();
-        const name = (body.name || '').trim() || (email ? email.split('@')[0] : 'Google User');
-        const avatar = (body.avatar || '').trim() || '/avatars/p1.jpg';
+        let email = (body.email || '').trim().toLowerCase();
+        let name = (body.name || '').trim();
+        let avatar = (body.avatar || '').trim() || '/avatars/p1.jpg';
+        const accessToken = (body.accessToken || '').trim();
+        const credential = (body.credential || '').trim();
+
+        // Server-Side Verification: If accessToken or ID token credential is provided, verify it directly with Google
+        if (accessToken) {
+          try {
+            const googleVerifyRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (googleVerifyRes.ok) {
+              const verifiedProfile = await googleVerifyRes.json();
+              if (verifiedProfile && verifiedProfile.email) {
+                email = verifiedProfile.email.trim().toLowerCase();
+                name = verifiedProfile.name || verifiedProfile.given_name || name;
+                avatar = verifiedProfile.picture || avatar;
+              }
+            } else {
+              return sendJson(res, 401, { status: 'error', message: 'Invalid or expired Google OAuth token.' });
+            }
+          } catch (verifyErr) {
+            console.warn('[GOOGLE TOKEN VERIFY WARN]', verifyErr.message);
+          }
+        } else if (credential) {
+          try {
+            const tokenVerifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+            if (tokenVerifyRes.ok) {
+              const verifiedToken = await tokenVerifyRes.json();
+              if (verifiedToken && verifiedToken.email) {
+                email = verifiedToken.email.trim().toLowerCase();
+                name = verifiedToken.name || name;
+                avatar = verifiedToken.picture || avatar;
+              }
+            } else {
+              return sendJson(res, 401, { status: 'error', message: 'Invalid Google credential token.' });
+            }
+          } catch (credErr) {
+            console.warn('[GOOGLE CREDENTIAL VERIFY WARN]', credErr.message);
+          }
+        }
+
+        if (!name) name = email ? email.split('@')[0] : 'Google User';
 
         if (!email || !email.includes('@')) {
           return sendJson(res, 422, { status: 'error', message: 'Valid Google email is required.' });

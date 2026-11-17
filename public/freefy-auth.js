@@ -657,7 +657,8 @@
                     body: JSON.stringify({
                       email: profile.email,
                       name: profile.name || profile.given_name || profile.email.split('@')[0],
-                      avatar: profile.picture || '/avatars/p1.jpg'
+                      avatar: profile.picture || '/avatars/p1.jpg',
+                      accessToken: tokenResponse.access_token
                     })
                   });
                   const loginData = await loginRes.json();
@@ -707,7 +708,8 @@
                   body: JSON.stringify({
                     email: profile.email,
                     name: profile.name || profile.given_name || profile.email.split('@')[0],
-                    avatar: profile.picture || '/avatars/p1.jpg'
+                    avatar: profile.picture || '/avatars/p1.jpg',
+                    credential: response.credential
                   })
                 });
                 const loginData = await loginRes.json();
@@ -768,7 +770,8 @@
               body: JSON.stringify({
                 email: profile.email,
                 name: profile.name || profile.given_name || profile.email.split('@')[0],
-                avatar: profile.picture || '/avatars/p1.jpg'
+                avatar: profile.picture || '/avatars/p1.jpg',
+                accessToken: accessToken
               })
             }).then(r => r.json()).then(data => {
               const userObj = (data && data.user) ? data.user : {
