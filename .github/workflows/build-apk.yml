@@ -5,9 +5,7 @@ on:
   push:
     paths:
       - 'android/**'
-      - 'public/assets/**'
-      - 'public/artists/**'
-      - 'public/avatars/**'
+      - 'public/**'
       - '.github/workflows/build-apk.yml'
 
 permissions:
@@ -59,7 +57,18 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk AuraMusic.apk
           gh release delete apk-latest --cleanup-tag -y || true
-          gh release create apk-latest AuraMusic.apk --title "AuraMusic APK" --latest \
-            --notes "Latest Android build (run ${{ github.run_number }}). Download AuraMusic.apk and install it."
+          gh release create apk-latest AuraMusic.apk --title "AuraMusic APK – Smart Features Update" --latest \
+            --notes "Latest Android build (run ${{ github.run_number }}).
+
+## What's new in this build:
+- ➕ Add to Playlist button on every song (right-click / long-press)
+- ❤️ Like a song → auto-added to Favorites playlist
+- 🕐 Recently Played playlist – auto-updates with every song you play
+- 🔀 Shuffle from Library or any Playlist
+- ⚡ Fast playback – next songs pre-warmed for <1.5s start time
+- 🔍 Real-time search suggestions
+- 🤖 YouTube-style smart recommendations & autoplay
+
+Download AuraMusic.apk and install it on your Android device."
           # The download link on the site only works for a published (non-draft) release.
           gh release edit apk-latest --draft=false --latest
