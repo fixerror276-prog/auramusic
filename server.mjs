@@ -7,6 +7,7 @@ import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
+import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
@@ -748,6 +749,25 @@ function sameSong(a, b) {
 // Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
 const searchCache = new Map();
 
+// Default "Trending" search: popular songs of well-known Indian singers (a different mix each hour).
+let trendingCache = { at: 0, data: [] };
+async function trendingIndian() {
+  if (trendingCache.data.length && Date.now() - trendingCache.at < 3600000) return trendingCache.data;
+  const hour = Math.floor(Date.now() / 3600000);
+  const picks = [];
+  for (let i = 0; i < 6; i++) picks.push(TRENDING_ARTISTS[(hour * 5 + i * 7) % TRENDING_ARTISTS.length]);
+  const lists = await Promise.all([...new Set(picks)].map(a => searchYouTube(`${a} popular songs`).catch(() => [])));
+  const out = [], seen = new Set();
+  for (let round = 0; round < 4; round++) {
+    for (const list of lists) {
+      const v = list.filter(s => s.duration >= 90 && s.duration <= 600 && songLanguage(s.name, s.artist) !== 'en')[round];
+      if (v && !seen.has(v.videoId)) { seen.add(v.videoId); out.push(v); }
+    }
+  }
+  if (out.length) trendingCache = { at: Date.now(), data: out };
+  return out;
+}
+
 async function searchYouTube(query) {
   if (!query || !query.trim()) return [];
   const norm = query.trim().toLowerCase();
@@ -844,6 +864,9 @@ async function searchYouTube(query) {
       // App Proxy / Search / Lyrics / Playlists APIs (Preserving existing website features)
       if (pathname === '/api/yt/search') {
         const query = parsedUrl.searchParams.get('q') || '';
+        if (!query.trim() || /^(trending|trending now|popular|top songs|top hits)$/i.test(query.trim())) {
+          return sendJson(res, 200, await trendingIndian());
+        }
         const results = await searchYouTube(query);
         return sendJson(res, 200, results);
       }
@@ -900,13 +923,27 @@ async function searchYouTube(query) {
           }
         };
 
-        try { take(await getRelated(ytAudioClient, id)); } catch (_) {}
+        // What the listener played lately ("name|artist;name|artist"), so suggestions follow their taste.
+        const recent = (parsedUrl.searchParams.get('hist') || '').split(';').slice(0, 12)
+          .map(x => { const [n, a] = x.split('|'); return { name: n || '', artist: a || '' }; });
+        const wantIndian = prefersIndian({ title, artist }, recent);
+        const fit = list => (wantIndian ? keepIndian(list) : list);
 
-        // Not enough recommendations: more songs by the same artist.
-        if (picked.length < 5) {
+        try { take(fit(await getRelated(ytAudioClient, id))); } catch (_) {}
+
+        // Not enough recommendations: more songs by the same artist, then popular songs in the listener's language.
+        const asVideos = found => found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
+        if (picked.length < 8) {
           const query = `${(artist || title).split(',')[0].trim()} songs`;
-          const found = await searchYouTube(query);
-          take(found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image })));
+          take(fit(asVideos(await searchYouTube(query))));
+        }
+        if (picked.length < 8 && wantIndian) {
+          const lang = /punjabi/i.test(`${title} ${artist}`) ? 'punjabi' : 'hindi';
+          take(keepIndian(asVideos(await searchYouTube(`${(artist || '').split(',')[0].trim()} best ${lang} songs`))));
+        }
+        if (picked.length < 8 && wantIndian) {
+          const pick = TRENDING_ARTISTS[Math.floor(Math.random() * TRENDING_ARTISTS.length)];
+          take(keepIndian(asVideos(await searchYouTube(`${pick} popular songs`))));
         }
         return sendJson(res, 200, picked.slice(0, 20).map(toSong));
       }
@@ -1108,7 +1145,9 @@ async function searchYouTube(query) {
       }
 
       if (pathname === '/api/playlists') {
-        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        // The app sends the user id in the query (GET/PUT/DELETE) or in the body (POST); accept both.
+        const plBody = (req.method === 'POST' || req.method === 'PUT') ? await parseBody(req) : {};
+        const userId = parsedUrl.searchParams.get('userId') || plBody.userId || 'guest';
         if (!memoryDb.playlists[userId]) memoryDb.playlists[userId] = [];
 
         // 1. GET Playlists
@@ -1118,7 +1157,7 @@ async function searchYouTube(query) {
 
         // 2. CREATE Playlist
         if (req.method === 'POST') {
-          const body = await parseBody(req);
+          const body = plBody;
           const name = (body.name || '').trim() || 'My Playlist';
           const newPlaylist = {
             id: `pl_${Date.now()}`,
@@ -1135,7 +1174,7 @@ async function searchYouTube(query) {
 
         // 3. ADD or REMOVE song in Playlist
         if (req.method === 'PUT') {
-          const body = await parseBody(req);
+          const body = plBody;
           const playlistId = String(body.playlistId || '');
           const action = body.action || 'add';
           const pl = memoryDb.playlists[userId].find(p => String(p.id || p._id) === playlistId);

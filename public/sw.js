@@ -1,4 +1,4 @@
-const CACHE_NAME = 'auramusic-v2.9';
+const CACHE_NAME = 'auramusic-v3.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

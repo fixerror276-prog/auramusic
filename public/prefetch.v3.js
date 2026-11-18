@@ -86,7 +86,10 @@
   function fetchRelated(seed, done, fail) {
     fetch('/api/yt/related?id=' + encodeURIComponent(videoId(seed)) +
           '&title=' + encodeURIComponent(seed.name || '') +
-          '&artist=' + encodeURIComponent(seed.artist || ''))
+          '&artist=' + encodeURIComponent(seed.artist || '') +
+          '&hist=' + encodeURIComponent(history.slice(-10).map(function (h) {
+            return String(h.name || '').replace(/[|;]/g, ' ') + '|' + String(h.artist || '').replace(/[|;]/g, ' ');
+          }).join(';')))
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (list) {
         if (Array.isArray(list) && list.length) done(list); else fail();
