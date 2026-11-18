@@ -741,5 +741,284 @@
     fastSearch: searchFastSongs
   };
 
-  console.log('✅ AuraMusic Smart Features v2.1 loaded (Fast Music Player Active)');
+  // ── 13. Auto-Suggest Dropdown (2 char trigger, YouTube/JioSaavn hybrid) ──
+  (function setupAutoSuggest() {
+    // ── Styles ──
+    const style = document.createElement('style');
+    style.textContent = `
+      #aura-suggest-box {
+        position: absolute; z-index: 999999;
+        background: #0f1623; border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+        padding: 6px 0; min-width: 320px; max-width: 500px;
+        overflow: hidden; animation: aura-suggest-in 0.15s ease;
+      }
+      @keyframes aura-suggest-in {
+        from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      .aura-suggest-item {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 14px; cursor: pointer; transition: background 0.12s;
+        color: #e2e8f0;
+      }
+      .aura-suggest-item:hover, .aura-suggest-item.aura-suggest-active {
+        background: rgba(16,185,129,0.12);
+      }
+      .aura-suggest-img {
+        width: 38px; height: 38px; border-radius: 8px;
+        object-fit: cover; flex-shrink: 0;
+        background: #1e293b; border: 1px solid rgba(255,255,255,0.08);
+      }
+      .aura-suggest-icon {
+        width: 38px; height: 38px; border-radius: 8px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(16,185,129,0.1); color: #10b981; font-size: 14px;
+      }
+      .aura-suggest-text { flex: 1; min-width: 0; }
+      .aura-suggest-name {
+        font-size: 13px; font-weight: 600; color: #f1f5f9;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .aura-suggest-artist {
+        font-size: 11px; color: #64748b; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis;
+      }
+      .aura-suggest-pill {
+        font-size: 9px; padding: 2px 6px; border-radius: 999px;
+        background: rgba(16,185,129,0.15); color: #10b981;
+        font-weight: 700; flex-shrink: 0;
+      }
+      .aura-suggest-sep {
+        height: 1px; background: rgba(255,255,255,0.05); margin: 4px 0;
+      }
+    `;
+    document.head.appendChild(style);
+
+    let suggestBox = null;
+    let activeInput = null;
+    let suggestActive = -1;
+    let suggestItems = [];
+    let suggestFetching = false;
+    let suggestDebounce = null;
+    let currentQuery = '';
+
+    function removeSuggest() {
+      if (suggestBox) { suggestBox.remove(); suggestBox = null; }
+      suggestItems = []; suggestActive = -1;
+    }
+
+    function positionBox(input) {
+      if (!suggestBox || !input) return;
+      const rect = input.getBoundingClientRect();
+      suggestBox.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+      suggestBox.style.left = rect.left + 'px';
+      suggestBox.style.width = Math.max(320, rect.width) + 'px';
+    }
+
+    function renderItems(items) {
+      if (!suggestBox) return;
+      suggestBox.innerHTML = '';
+      suggestItems = items;
+      suggestActive = -1;
+      items.forEach(function(item, idx) {
+        if (item.type === 'sep') {
+          const sep = document.createElement('div');
+          sep.className = 'aura-suggest-sep';
+          suggestBox.appendChild(sep);
+          return;
+        }
+        const el = document.createElement('div');
+        el.className = 'aura-suggest-item';
+        el.dataset.idx = idx;
+
+        if (item.image) {
+          el.innerHTML = `
+            <img class="aura-suggest-img" src="${item.image}" alt="" loading="lazy" onerror="this.style.display='none'">
+            <div class="aura-suggest-text">
+              <div class="aura-suggest-name">${item.name}</div>
+              ${item.artist ? `<div class="aura-suggest-artist">${item.artist}</div>` : ''}
+            </div>
+            ${item.pill ? `<span class="aura-suggest-pill">${item.pill}</span>` : ''}
+          `;
+        } else {
+          el.innerHTML = `
+            <div class="aura-suggest-icon">${item.icon || '🔍'}</div>
+            <div class="aura-suggest-text">
+              <div class="aura-suggest-name">${item.name}</div>
+              ${item.artist ? `<div class="aura-suggest-artist">${item.artist}</div>` : ''}
+            </div>
+          `;
+        }
+        el.addEventListener('mousedown', function(ev) {
+          ev.preventDefault();
+          selectItem(item);
+        });
+        suggestBox.appendChild(el);
+      });
+    }
+
+    function selectItem(item) {
+      removeSuggest();
+      if (!activeInput) return;
+
+      if (item.songObj) {
+        // Direct song play via downloadUrl
+        activeInput.value = item.name;
+        try { activeInput.dispatchEvent(new Event('input', { bubbles: true })); } catch(_) {}
+        playFastSong(item.songObj);
+        return;
+      }
+      // Fill search bar with text query and trigger search
+      activeInput.value = item.query || item.name;
+      try {
+        activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        // Also submit the form
+        const form = activeInput.closest('form');
+        if (form) {
+          setTimeout(() => form.requestSubmit ? form.requestSubmit() : form.submit(), 80);
+        }
+      } catch(_) {}
+    }
+
+    async function fetchSuggestions(query) {
+      const q = (query || '').trim();
+      if (q.length < 2) return;
+      currentQuery = q;
+      suggestFetching = true;
+
+      const items = [];
+
+      // Parallel: 1) YT suggestions (text) + 2) JioSaavn song suggestions (with thumbnails)
+      const [ytSuggest, saavnSongs] = await Promise.allSettled([
+        // YouTube search suggestions (fast, text only)
+        fetch(`/api/yt/suggestions?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(1500) })
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null),
+        // JioSaavn songs with images
+        fetch(`/api/search/songs?query=${encodeURIComponent(q)}&limit=5`, { signal: AbortSignal.timeout(2000) })
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      ]);
+
+      // If query changed during fetch, discard
+      if (currentQuery !== q) return;
+
+      // Add Saavn song results FIRST (most useful — click to play instantly)
+      const saavnData = saavnSongs.status === 'fulfilled' ? saavnSongs.value : null;
+      const saavnResults = saavnData?.data?.results || [];
+      if (saavnResults.length > 0) {
+        saavnResults.slice(0, 5).forEach(function(song) {
+          if (!song.name) return;
+          const imgArr = song.image || [];
+          const img = imgArr[imgArr.length - 1]?.url || imgArr[0]?.url || '';
+          const artist = song.artists?.primary?.[0]?.name || '';
+          items.push({
+            type: 'song',
+            name: song.name,
+            artist: artist,
+            image: img,
+            pill: '▶ Play',
+            query: song.name,
+            songObj: song
+          });
+        });
+        items.push({ type: 'sep' });
+      }
+
+      // Add YouTube text suggestions AFTER songs
+      const ytData = ytSuggest.status === 'fulfilled' ? ytSuggest.value : null;
+      const ytSuggestions = ytData?.suggestions || [];
+      ytSuggestions.slice(0, 5).forEach(function(sug) {
+        if (!sug || sug.toLowerCase() === q.toLowerCase()) return;
+        items.push({
+          type: 'query',
+          name: sug,
+          artist: '',
+          icon: '🔍',
+          query: sug
+        });
+      });
+
+      suggestFetching = false;
+      if (currentQuery !== q || !suggestBox) return;
+      if (items.filter(i => i.type !== 'sep').length === 0) { removeSuggest(); return; }
+      renderItems(items);
+    }
+
+    // ── Watch for search input focus + typing ──
+    function isSearchInput(el) {
+      if (!el || el.tagName !== 'INPUT') return false;
+      const ph = (el.placeholder || '').toLowerCase();
+      const cls = (el.className || '').toLowerCase();
+      return el.type === 'text' && (
+        ph.includes('search') || ph.includes('hindi') || ph.includes('song') ||
+        cls.includes('search') || el.id?.includes('search')
+      );
+    }
+
+    document.addEventListener('input', function(e) {
+      if (!isSearchInput(e.target)) return;
+      activeInput = e.target;
+      const val = (e.target.value || '').trim();
+      clearTimeout(suggestDebounce);
+
+      if (val.length < 2) { removeSuggest(); return; }
+
+      // Create suggest box if not existing
+      if (!suggestBox) {
+        suggestBox = document.createElement('div');
+        suggestBox.id = 'aura-suggest-box';
+        document.body.appendChild(suggestBox);
+      }
+      positionBox(e.target);
+
+      // Debounce 200ms for 2-3 chars, 120ms for longer
+      const delay = val.length <= 3 ? 200 : 120;
+      suggestDebounce = setTimeout(() => fetchSuggestions(val), delay);
+    }, true);
+
+    // Hide on blur
+    document.addEventListener('blur', function(e) {
+      if (isSearchInput(e.target)) {
+        setTimeout(removeSuggest, 200);
+      }
+    }, true);
+
+    // Keyboard nav inside dropdown
+    document.addEventListener('keydown', function(e) {
+      if (!suggestBox || !suggestItems.length) return;
+      const selectables = suggestItems.filter(i => i.type !== 'sep');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        suggestActive = Math.min(suggestActive + 1, selectables.length - 1);
+        suggestBox.querySelectorAll('.aura-suggest-item').forEach((el, i) => {
+          el.classList.toggle('aura-suggest-active', i === suggestActive);
+        });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        suggestActive = Math.max(suggestActive - 1, 0);
+        suggestBox.querySelectorAll('.aura-suggest-item').forEach((el, i) => {
+          el.classList.toggle('aura-suggest-active', i === suggestActive);
+        });
+      } else if (e.key === 'Enter' && suggestActive >= 0) {
+        e.preventDefault();
+        selectItem(selectables[suggestActive]);
+      } else if (e.key === 'Escape') {
+        removeSuggest();
+      }
+    }, true);
+
+    // Reposition on scroll/resize
+    window.addEventListener('scroll', function() {
+      if (suggestBox && activeInput) positionBox(activeInput);
+    }, true);
+    window.addEventListener('resize', function() {
+      if (suggestBox && activeInput) positionBox(activeInput);
+    });
+
+    console.log('✅ AuraMusic Auto-Suggest loaded (2-char trigger, song+query hybrid)');
+  })();
+
+  console.log('✅ AuraMusic Smart Features v3.1 loaded (Buffering Optimizer + Auto-Suggest + Taste Lock)');
 })();

@@ -976,11 +976,12 @@ async function searchYouTube(query) {
         return sendJson(res, 200, { warming: ids.length });
       }
 
-      // Songs to play after this one: /api/yt/related?id=<videoId>&title=..&artist=..
+      // Songs to play after this one: /api/yt/related?id=<videoId>&title=..&artist=..&lang=in|en
       if (pathname === '/api/yt/related') {
         const id = (parsedUrl.searchParams.get('id') || '').replace(/^yt_|^yt-/, '').trim();
         const title = parsedUrl.searchParams.get('title') || '';
         const artist = parsedUrl.searchParams.get('artist') || '';
+        const clientLang = (parsedUrl.searchParams.get('lang') || '').trim(); // 'in', 'en', or ''
         if (!id) return sendJson(res, 400, { error: 'Missing video id' });
 
         const toSong = v => ({
@@ -991,7 +992,7 @@ async function searchYouTube(query) {
           album: 'YouTube Music Single',
           duration: Number(v.duration) || 200,
           image: v.image || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-          url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(v.title || '')}`,
+          url: `/api/yt/stream?id=${v.videoId}&title=${encodeURIComponent(v.title||'')}&artist=${encodeURIComponent(v.artist||'')}`,
           genre: 'Music',
           year: new Date().getFullYear().toString(),
           source: 'AuraMusic Live'
@@ -1002,35 +1003,59 @@ async function searchYouTube(query) {
           for (const v of list) {
             if (!v?.videoId || v.videoId === id || !v.title) continue;
             const dur = Number(v.duration) || 0;
-            if (dur && (dur < 60 || dur > 600)) continue;            // keep song-length videos
-            if (sameSong(v.title, title)) continue;                    // another version of this song
-            if (picked.some(p => p.videoId === v.videoId || sameSong(p.title, v.title))) continue;
+            if (dur && (dur < 60 || dur > 600)) continue;
+            if (sameSong(v.title, title)) continue;              // duplicate version of same song
+            if (picked.some(p => p.videoId === v.videoId || sameSong(p.title, v.title))) continue; // already have it
             picked.push(v);
           }
         };
 
-        // What the listener played lately ("name|artist;name|artist"), so suggestions follow their taste.
+        // ── Taste Lock: determine language from client signal + song signal ──
         const recent = (parsedUrl.searchParams.get('hist') || '').split(';').slice(0, 12)
           .map(x => { const [n, a] = x.split('|'); return { name: n || '', artist: a || '' }; });
-        const wantIndian = prefersIndian({ title, artist }, recent);
-        const fit = list => (wantIndian ? keepIndian(list) : list);
+
+        // Client already computed taste; trust it. Fallback to our own detection.
+        let wantIndian;
+        if (clientLang === 'in') wantIndian = true;
+        else if (clientLang === 'en') wantIndian = false;
+        else wantIndian = prefersIndian({ title, artist }, recent);
+
+        // Strict filter when lang is explicitly set by client (Taste Lock ON)
+        const strictLock = clientLang === 'in';
+        const fit = list => {
+          if (!wantIndian) return list;
+          const filtered = keepIndian(list);
+          // In strict mode, never let foreign songs in; in soft mode, allow if too few results
+          if (strictLock) return filtered;
+          return filtered.length >= 3 ? filtered : keepIndian(list);
+        };
 
         try { take(fit(await getRelated(ytAudioClient, id))); } catch (_) {}
 
-        // Not enough recommendations: more songs by the same artist, then popular songs in the listener's language.
         const asVideos = found => found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
+
+        // Fill up with similar-artist songs
         if (picked.length < 8) {
           const query = `${(artist || title).split(',')[0].trim()} songs`;
           take(fit(asVideos(await searchYouTube(query))));
         }
+        // If Indian taste, add language-specific songs
         if (picked.length < 8 && wantIndian) {
-          const lang = /punjabi/i.test(`${title} ${artist}`) ? 'punjabi' : 'hindi';
-          take(keepIndian(asVideos(await searchYouTube(`${(artist || '').split(',')[0].trim()} best ${lang} songs`))));
+          const subLang = /punjabi/i.test(`${title} ${artist}`) ? 'punjabi hits' :
+                          /bhojpuri/i.test(`${title} ${artist}`) ? 'bhojpuri hits' : 'hindi hits';
+          take(keepIndian(asVideos(await searchYouTube(`${(artist || '').split(',')[0].trim()} ${subLang}`))));
         }
+        // Last resort: trending Indian songs
         if (picked.length < 8 && wantIndian) {
           const pick = TRENDING_ARTISTS[Math.floor(Math.random() * TRENDING_ARTISTS.length)];
           take(keepIndian(asVideos(await searchYouTube(`${pick} popular songs`))));
         }
+        // If still not enough and English taste, add English similar songs
+        if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
+          take(asVideos(await searchYouTube(`${(artist || title).split(',')[0].trim()} best songs`)));
+        }
+
+        res.setHeader('Cache-Control', 'public, max-age=120');
         return sendJson(res, 200, picked.slice(0, 20).map(toSong));
       }
 

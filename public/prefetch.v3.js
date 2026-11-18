@@ -94,15 +94,83 @@
   }, true);
 })();
 
-// Endless "next": the queue after a search is full of versions of one song, and a short queue
-// ends up replaying songs. These helpers keep a play history, skip anything played recently and
-// keep fetching related songs, so "next" always gives a new song and nothing comes back soon.
+// ── Smart Queue: Mood Match, Taste Lock, Duplicate Removal ──────────────────
+// - Keeps a play history (what was played in last 6hrs)
+// - Detects user's "language taste" from recent plays: Hindi/Punjabi vs English
+// - Sends `lang` param to server so related songs match user's taste
+// - Removes duplicate versions of same song (needs → trim at threshold 1)
+// - Taste Lock: if user is in Indian mode, all queued songs are filtered to Indian
 (function () {
   var NOISE = /\b(official|video|audio|lyrical|lyrics|lyric|full|song|songs|hd|4k|remix|slowed|reverb|lofi|cover|version|8d|bass|boosted|reprise|karaoke|instrumental|unplugged|live|male|female|feat|ft|music|visualizer|new)\b/g;
-  var HISTORY_KEY = 'aura_played_v1';
-  var HISTORY_MAX = 60;                        // songs remembered
-  var HISTORY_AGE = 6 * 60 * 60 * 1000;        // ...for six hours
+  var HISTORY_KEY = 'aura_played_v2';          // bumped to clear old cache
+  var HISTORY_MAX = 80;
+  var HISTORY_AGE = 8 * 60 * 60 * 1000;        // 8 hours
 
+  // ── Taste detection ──────────────────────────────────────────────────────
+  // Known Indian artists (lowercase) for fast O(1) lookup
+  var INDIAN_ARTISTS_SET = new Set([
+    'arijit singh','atif aslam','shreya ghoshal','neha kakkar','badshah','honey singh',
+    'yo yo honey singh','diljit dosanjh','ap dhillon','sidhu moose wala','karan aujla',
+    'jubin nautiyal','darshan raval','sonu nigam','kumar sanu','udit narayan','alka yagnik',
+    'lata mangeshkar','kishore kumar','mohammed rafi','mohit chauhan','kk','vishal mishra',
+    'b praak','guru randhawa','armaan malik','pritam','a r rahman','a.r. rahman','anuv jain',
+    'sunidhi chauhan','asees kaur','tulsi kumar','mika singh','jass manak','harrdy sandhu',
+    'shubh','king','mc stan','prateek kuhad','jasleen royal','sachin-jigar','amit trivedi',
+    'vishal-shekhar','papon','palak muchhal','payal dev','stebin ben','ammy virk','amrit maan',
+    'kaka','jaani','mankirt aulakh','gurnam bhullar','raftaar','emiway','divine','imran khan',
+    'arjun kanungo','ankit tiwari','mithoon','sukhwinder singh','rahat fateh ali khan',
+    'nusrat fateh ali khan','talwiinder','anirudh ravichander','sid sriram','dhanush',
+    'yuvan shankar raja','sp balasubramanyam','zahrah s khan','nikhita gandhi','rochak kohli',
+    'tanishk bagchi','darshan raval','yasser desai','raghav chaitanya','dhvani bhanushali'
+  ]);
+  var INDIC_SCRIPT = /[\u0900-\u097F\u0A00-\u0A7F\u0980-\u09FF\u0B80-\u0BFF\u0C00-\u0C7F\u0AA0-\u0ABF]/;
+  var HINDI_WORDS = /\b(tera|mera|meri|teri|tum|hum|dil|pyar|ishq|mohabbat|zindagi|saath|yaar|yaad|bekhayali|kesariya|tujhe|mujhe|humsafar|dilbar|dhadkan|chaand|aankhein|bollywood|hindi|punjabi|bhojpuri)\b/i;
+
+  // Returns 'in' (Indian), 'en' (Western), or '' (unknown)
+  function songLang(name, artist) {
+    var t = String(name || '').toLowerCase();
+    var a = String(artist || '').toLowerCase();
+    // Indic script = definite Indian
+    if (INDIC_SCRIPT.test(t + a)) return 'in';
+    // Exact artist match
+    var parts = a.replace(/[,&]/g, '|').split('|').map(function(x) { return x.trim(); });
+    for (var i = 0; i < parts.length; i++) {
+      if (INDIAN_ARTISTS_SET.has(parts[i])) return 'in';
+    }
+    // Hindi title keywords
+    if (HINDI_WORDS.test(t)) return 'in';
+    // Known label signals
+    if (/\b(t.series|zee music|sony music india|tips|saregama|speed records|desi melodies|lahari|hungama|aditya music)\b/i.test(t + a)) return 'in';
+    return '';
+  }
+
+  // Determine user's dominant taste from recent plays: 'in', 'en', or ''
+  function tasteLang() {
+    var rec = recent().slice(-15);
+    var ind = 0, eng = 0;
+    rec.forEach(function(h) {
+      var l = songLang(h.name, h.artist);
+      if (l === 'in') ind++;
+      else if (l === 'en') eng++;
+    });
+    if (ind + eng === 0) return '';
+    // 60%+ = locked to that language
+    if (ind / (ind + eng) >= 0.6) return 'in';
+    if (eng / (ind + eng) >= 0.6) return 'en';
+    return '';
+  }
+
+  // Filter list to match user's taste
+  function applyTasteLock(list, taste) {
+    if (!taste) return list;
+    if (taste === 'in') {
+      var indian = list.filter(function(s) { return songLang(s.name, s.artist) !== 'en'; });
+      return indian.length >= 3 ? indian : list; // at least 3 songs, else keep all
+    }
+    return list;
+  }
+
+  // ── Core dedup + history ─────────────────────────────────────────────────
   function key(t) {
     return String(t || '').toLowerCase()
       .replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, ' ')
@@ -110,7 +178,8 @@
       .replace(/[^\p{L}\p{N}]+/gu, ' ')
       .trim();
   }
-  // Same song = the first words of the titles match (the rest is "Official Video", artist, "Lofi mix"...).
+
+  // Same song = first words match (regardless of "Official Video", "Lofi", etc.)
   function same(a, b) {
     var x = key(a).split(' ').filter(Boolean);
     var y = key(b).split(' ').filter(Boolean);
@@ -119,25 +188,37 @@
     for (var i = 0; i < n; i++) if (x[i] !== y[i]) return false;
     return n >= 2 || x[0].length >= 4;
   }
-  var isYt = function (s) { return !!s && String(s.id || '').indexOf('yt_') === 0; };
-  var videoId = function (s) { return s.videoId || String(s.id || '').replace(/^yt_|^yt-/, ''); };
 
-  var history = (function () {
+  var isYt = function(s) { return !!s && String(s.id || '').indexOf('yt_') === 0; };
+  var videoId = function(s) { return s.videoId || String(s.id || '').replace(/^yt_|^yt-/, ''); };
+
+  var history = (function() {
     try {
       var h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
       return Array.isArray(h) ? h : [];
     } catch (e) { return []; }
   })();
+
   function recent() {
     var cutoff = Date.now() - HISTORY_AGE;
-    return history.filter(function (h) { return h.t > cutoff; });
+    return history.filter(function(h) { return h.t > cutoff; });
   }
   function played(song) {
     if (!isYt(song)) return;
-    history = history.filter(function (h) { return h.id !== song.id; });
-    history.push({ id: song.id, videoId: videoId(song), name: song.name || '', artist: song.artist || '', t: Date.now() });
+    history = history.filter(function(h) { return h.id !== song.id; });
+    history.push({
+      id: song.id, videoId: videoId(song),
+      name: song.name || '', artist: song.artist || '',
+      lang: songLang(song.name, song.artist),
+      t: Date.now()
+    });
     if (history.length > HISTORY_MAX) history = history.slice(-HISTORY_MAX);
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {}
+    // Update taste lock display
+    var lang = tasteLang();
+    if (lang) {
+      try { localStorage.setItem('aura_taste_lang', lang + ':' + Date.now()); } catch(e) {}
+    }
   }
   function wasPlayed(song) {
     if (!isYt(song)) return false;
@@ -148,28 +229,42 @@
     return false;
   }
 
+  // ── Fetch related songs from server ─────────────────────────────────────
   function fetchRelated(seed, done, fail) {
-    fetch('/api/yt/related?id=' + encodeURIComponent(videoId(seed)) +
-          '&title=' + encodeURIComponent(seed.name || '') +
-          '&artist=' + encodeURIComponent(seed.artist || '') +
-          '&hist=' + encodeURIComponent(history.slice(-10).map(function (h) {
-            return String(h.name || '').replace(/[|;]/g, ' ') + '|' + String(h.artist || '').replace(/[|;]/g, ' ');
-          }).join(';')))
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (list) {
-        if (Array.isArray(list) && list.length) done(list); else fail();
+    var lang = tasteLang();
+    var url = '/api/yt/related'
+      + '?id=' + encodeURIComponent(videoId(seed))
+      + '&title=' + encodeURIComponent(seed.name || '')
+      + '&artist=' + encodeURIComponent(seed.artist || '')
+      + '&lang=' + encodeURIComponent(lang)
+      + '&hist=' + encodeURIComponent(history.slice(-12).map(function(h) {
+          return String(h.name || '').replace(/[|;]/g, ' ')
+            + '|' + String(h.artist || '').replace(/[|;]/g, ' ');
+        }).join(';'));
+
+    fetch(url)
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(list) {
+        if (!Array.isArray(list) || !list.length) { fail(); return; }
+        // Client-side Taste Lock enforcement (belt+suspenders after server filter)
+        var taste = tasteLang();
+        var locked = applyTasteLock(list, taste);
+        if (locked.length) done(locked); else fail();
       })
-      .catch(function () { fail(); });
+      .catch(function() { fail(); });
   }
 
-  // put related songs right after the current one, leaving out anything played recently
+  // ── Merge: insert related right after current song, skip played/duplicates ──
   function merge(cur, queue, add) {
     var have = {};
-    queue.forEach(function (s) { have[s.id] = true; });
-    var fresh = add.filter(function (s) {
+    queue.forEach(function(s) { have[s.id] = true; });
+    // Taste Lock on merge too
+    var taste = tasteLang();
+    var filtered = applyTasteLock(add, taste);
+    var fresh = filtered.filter(function(s) {
       return !have[s.id] && !same(s.name, cur.name) && !wasPlayed(s);
     });
-    var at = queue.findIndex(function (s) { return s.id === cur.id; });
+    var at = queue.findIndex(function(s) { return s.id === cur.id; });
     if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 2).map(videoId));
     if (at < 0) return queue.concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
@@ -182,53 +277,70 @@
     played: played,
     wasPlayed: wasPlayed,
     merge: merge,
+    tasteLang: tasteLang,
+    songLang: songLang,
 
-    // Fresh related songs for `cur`. If everything related was already played, try what was
-    // related to the last couple of songs. ok(list) with new songs, fail() when none are found.
-    playRelated: function (cur, ok, fail) {
+    playRelated: function(cur, ok, fail) {
       var seeds = [cur];
-      var past = recent().filter(function (h) { return h.id !== cur.id; }).slice(-2).reverse();
-      past.forEach(function (h) { seeds.push({ id: h.id, videoId: h.videoId, name: h.name, artist: h.artist }); });
+      var past = recent().filter(function(h) { return h.id !== cur.id; }).slice(-3).reverse();
+      past.forEach(function(h) {
+        seeds.push({ id: h.id, videoId: h.videoId, name: h.name, artist: h.artist });
+      });
       var i = 0;
       (function tryNext() {
         if (i >= seeds.length) { fail(); return; }
         var seed = seeds[i++];
-        fetchRelated(seed, function (list) {
-          var fresh = list.filter(function (s) { return !wasPlayed(s) && !same(s.name, cur.name); });
+        fetchRelated(seed, function(list) {
+          var fresh = list.filter(function(s) { return !wasPlayed(s) && !same(s.name, cur.name); });
           if (fresh.length) ok(fresh); else tryNext();
         }, tryNext);
       })();
     },
 
-    // true when the queue holds two or more other versions of the song that was tapped
-    needs: function (cur, list) {
-      var n = 0;
+    // ── DUPLICATE REMOVAL: even 1 duplicate triggers trim (was 2) ──────────
+    needs: function(cur, list) {
       for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== cur.id && same(list[i].name, cur.name)) n++;
+        if (list[i].id !== cur.id && same(list[i].name, cur.name)) return true;
       }
-      return n >= 2;
+      return false;
     },
-    trim: function (cur, list) {
-      return list.filter(function (s) { return s.id === cur.id || !same(s.name, cur.name); });
+    trim: function(cur, list) {
+      // Keep only the BEST version (first occurrence = highest quality from server)
+      var seenSong = {};
+      return list.filter(function(s) {
+        if (s.id === cur.id) return true;
+        var k = key(s.name);
+        if (seenSong[k]) return false;
+        seenSong[k] = true;
+        return true;
+      });
     },
-    load: function (cur, done) {
-      fetchRelated(cur, done, function () {});
+    load: function(cur, done) {
+      fetchRelated(cur, done, function() {});
     },
 
-    // Keep at least three new songs queued after the current one, so "next" is instant.
-    topUp: function (cur, queue, setQueue, toSong) {
+    // Keep 4+ fresh songs queued after current (was 3)
+    topUp: function(cur, queue, setQueue, toSong) {
       if (!isYt(cur) || topping[cur.id]) return;
-      var at = queue.findIndex(function (s) { return s.id === cur.id; });
+      var at = queue.findIndex(function(s) { return s.id === cur.id; });
       if (at < 0) return;
+      var taste = tasteLang();
       var ahead = 0;
       for (var i = at + 1; i < queue.length; i++) {
-        if (!wasPlayed(queue[i]) && !same(queue[i].name, cur.name)) ahead++;
+        var s = queue[i];
+        if (!wasPlayed(s) && !same(s.name, cur.name)) {
+          // In taste-lock mode, only count songs matching the taste
+          if (!taste || songLang(s.name, s.artist) !== 'en') ahead++;
+        }
       }
-      if (ahead >= 3) return;
+      if (ahead >= 4) return;
       topping[cur.id] = true;
-      fetchRelated(cur, function (list) {
-        setQueue(function (q) { return merge(cur, q, list.map(toSong)); });
-      }, function () {});
+      fetchRelated(cur, function(list) {
+        setQueue(function(q) { return merge(cur, q, list.map(toSong)); });
+      }, function() {});
     }
   };
+
+  // Expose taste info on window for the auto-suggest feature
+  window.__auraTasteLang = tasteLang;
 })();
