@@ -166,6 +166,15 @@ async function getYtdlUrl(client, id) {
   });
 }
 
+// The raw (cached) URL from ytdl, for the server's own streaming proxy. Throws if none can be found.
+export function getDirectAudioUrl(client, id) {
+  return getYtdlUrl(client, id);
+}
+
+export function forgetDirectAudioUrl(id) {
+  cache.delete(`ytdl:${id}`);
+}
+
 async function getPortable(id) {
   const key = `portable:${id}`;
   const cached = getCached(key);

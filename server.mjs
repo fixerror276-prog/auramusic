@@ -7,7 +7,9 @@ import { Ytdl, SearchType } from '@distube/ytdl-core';
 const ytAudioClient = new Ytdl();
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
-import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated } from './audio_sources.mjs';
+import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
+import { proxyAudio } from './audio_proxy.mjs';
+import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -507,50 +509,19 @@ const server = http.createServer(async (req, res) => {
             // 6. Google Direct OAuth & Consent Login / Sync (Cryptographically Verified via Google API)
       if ((pathname === '/api/v1/auth/google-login' || pathname === '/api/auth/google-login') && req.method === 'POST') {
         const body = await parseBody(req);
-        let email = (body.email || '').trim().toLowerCase();
-        let name = (body.name || '').trim();
-        let avatar = (body.avatar || '').trim() || '/avatars/p1.jpg';
-        const accessToken = (body.accessToken || '').trim();
-        const credential = (body.credential || '').trim();
 
-        // Server-Side Verification: If accessToken or ID token credential is provided, verify it directly with Google
-        if (accessToken) {
-          try {
-            const googleVerifyRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            if (googleVerifyRes.ok) {
-              const verifiedProfile = await googleVerifyRes.json();
-              if (verifiedProfile && verifiedProfile.email) {
-                email = verifiedProfile.email.trim().toLowerCase();
-                name = verifiedProfile.name || verifiedProfile.given_name || name;
-                avatar = verifiedProfile.picture || avatar;
-              }
-            } else {
-              return sendJson(res, 401, { status: 'error', message: 'Invalid or expired Google OAuth token.' });
-            }
-          } catch (verifyErr) {
-            console.warn('[GOOGLE TOKEN VERIFY WARN]', verifyErr.message);
-          }
-        } else if (credential) {
-          try {
-            const tokenVerifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
-            if (tokenVerifyRes.ok) {
-              const verifiedToken = await tokenVerifyRes.json();
-              if (verifiedToken && verifiedToken.email) {
-                email = verifiedToken.email.trim().toLowerCase();
-                name = verifiedToken.name || name;
-                avatar = verifiedToken.picture || avatar;
-              }
-            } else {
-              return sendJson(res, 401, { status: 'error', message: 'Invalid Google credential token.' });
-            }
-          } catch (credErr) {
-            console.warn('[GOOGLE CREDENTIAL VERIFY WARN]', credErr.message);
-          }
+        // The email, name and photo come from Google's verified answer, never from the request body.
+        let identity;
+        try {
+          identity = await verifyGoogleLogin(body);
+        } catch (e) {
+          const status = e instanceof GoogleVerifyError ? e.status : 500;
+          console.warn('[GOOGLE LOGIN REJECTED]', e.message);
+          return sendJson(res, status, { status: 'error', message: e.message });
         }
-
-        if (!name) name = email ? email.split('@')[0] : 'Google User';
+        const email = String(identity.email || '').trim().toLowerCase();
+        const name = String(identity.name || '').trim() || (email ? email.split('@')[0] : 'Google User');
+        const avatar = String(identity.picture || '').trim() || '/avatars/p1.jpg';
 
         if (!email || !email.includes('@')) {
           return sendJson(res, 422, { status: 'error', message: 'Valid Google email is required.' });
@@ -1073,9 +1044,20 @@ async function searchYouTube(query) {
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
         if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
 
-        // json=1 mode: return stream URL for client-side playback
+        // json=1 mode: tell the player where to fetch the audio from.
         if (parsedUrl.searchParams.get('json') === '1') {
-          // Cached, checked against the client's IP, with Piped/Invidious fallbacks.
+          // 1) A direct link, if it will play from the client's own IP (e.g. server and phone on one network).
+          // 2) Otherwise stream through this server (works from any network, supports seeking).
+          // 3) If YouTube extraction is blocked here, fall back to Piped/Invidious.
+          try {
+            const direct = await getDirectAudioUrl(ytAudioClient, cleanId);
+            if (urlWorksForClient(direct, getClientIp(req))) {
+              return sendJson(res, 200, { streamUrl: direct, source: 'ytdl' });
+            }
+            return sendJson(res, 200, { streamUrl: `/api/yt/stream?id=${encodeURIComponent(cleanId)}`, source: 'proxy' });
+          } catch (e) {
+            console.warn(`[AUDIO] direct lookup failed for ${cleanId}: ${e.message}`);
+          }
           const result = await resolveAudio(ytAudioClient, cleanId, getClientIp(req));
           if (result?.streamUrl) {
             return sendJson(res, 200, { streamUrl: result.streamUrl, source: result.source });
@@ -1083,7 +1065,19 @@ async function searchYouTube(query) {
           return sendJson(res, 404, { error: 'Stream not found' });
         }
 
-        // Proxy stream mode
+        // Proxy stream mode: short Range chunks through this server.
+        try {
+          const served = await proxyAudio(req, res, {
+            getUrl: () => getDirectAudioUrl(ytAudioClient, cleanId),
+            forget: () => forgetDirectAudioUrl(cleanId)
+          });
+          if (served) return;
+        } catch (err) {
+          console.warn(`[AUDIO] proxy failed for ${cleanId}: ${err.message}`);
+          if (res.headersSent) return res.end();
+        }
+
+        // Last resort: let ytdl download and pipe the whole file (no seeking).
         try {
           const dlStream = ytAudioClient.download(`https://www.youtube.com/watch?v=${cleanId}`, {
             filter: { hasAudio: true, hasVideo: false },
@@ -1102,7 +1096,7 @@ async function searchYouTube(query) {
               });
             }
           });
-          dlStream.on('error', (dlErr) => {
+          dlStream.on('error', () => {
             if (!headersSent) sendJson(res, 500, { error: 'Audio stream failed' });
           });
           res.on('close', () => dlStream.destroy());

@@ -49,6 +49,8 @@ public class MainActivity extends Activity {
     private static final int BG = Color.parseColor("#090A0F");
     private static final int RC_SIGN_IN = 9001;
     private static final int RC_PICK_ACCOUNT = 9002;
+    // Same web client ID the site uses; the server only accepts ID tokens issued for it.
+    private static final String WEB_CLIENT_ID = "254466692985-6f6a09ehv1dvg2g4cr14m0ktqu2553vh.apps.googleusercontent.com";
     private GoogleSignInClient googleSignInClient;
     private static MainActivity current;
     public static MainActivity getInstance() { return current; }
@@ -93,6 +95,7 @@ public class MainActivity extends Activity {
         setContentView(webView);
 
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(WEB_CLIENT_ID) // signed proof the server verifies with Google
                 .requestEmail()
                 .requestProfile()
                 .build();
@@ -253,9 +256,9 @@ public class MainActivity extends Activity {
         handleAuthDeepLink(getIntent());
     }
 
-    // The Google-branded chooser needs this APK's SHA-1 registered in Google Cloud (otherwise it fails
-    // with error 10). Until that is done, the app goes straight to the phone's own account list and
-    // the Google-style chooser stays web-only. Set to true once the Android OAuth client exists.
+    // Verified login needs Google's own chooser (set this to true once the Android OAuth client exists): it returns a signed ID token the server checks with Google.
+    // It requires an Android OAuth client (package com.auramusic.app + this APK's SHA-1) in Google Cloud,
+    // otherwise it fails with error 10 and we fall back to the plain phone account list (unverified).
     private static final boolean USE_GOOGLE_SIGN_IN = false;
 
     public void launchGoogleSignInPrompt() {
@@ -342,6 +345,7 @@ public class MainActivity extends Activity {
                 user.put("email", account.getEmail());
                 user.put("avatar", account.getPhotoUrl() != null ? account.getPhotoUrl().toString() : "/avatars/p1.jpg");
                 user.put("provider", "google");
+                if (account.getIdToken() != null) user.put("idToken", account.getIdToken());
                 sendAuthUser(user);
             } catch (ApiException e) {
                 int code = e.getStatusCode();
@@ -350,7 +354,7 @@ public class MainActivity extends Activity {
                     sendAuthError("Sign-in cancelled.");
                 } else {
                     // Typically 10 (APK SHA-1 not registered in Google Cloud) or 12500.
-                    Toast.makeText(this, "Google sign-in error " + code + ", using phone accounts", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Google verification not set up (error " + code + "). Using phone accounts.", Toast.LENGTH_LONG).show();
                     launchAccountPicker("ApiException " + code);
                 }
             } catch (Exception e) {

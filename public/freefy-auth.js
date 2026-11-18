@@ -654,21 +654,14 @@
                   const loginRes = await fetch('/api/v1/auth/google-login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      email: profile.email,
-                      name: profile.name || profile.given_name || profile.email.split('@')[0],
-                      avatar: profile.picture || '/avatars/p1.jpg',
-                      accessToken: tokenResponse.access_token
-                    })
+                    body: JSON.stringify({ accessToken: tokenResponse.access_token })
                   });
-                  const loginData = await loginRes.json();
-                  const userObj = (loginData && loginData.user) ? loginData.user : {
-                    name: profile.name || profile.email.split('@')[0],
-                    email: profile.email,
-                    avatar: profile.picture || '/avatars/p1.jpg',
-                    provider: 'google'
-                  };
-                  handleAuthSuccess(userObj);
+                  const loginData = await loginRes.json().catch(() => null);
+                  if (!loginRes.ok || !loginData || !loginData.user) {
+                    showAlert((loginData && loginData.message) || 'Google sign-in could not be verified.', 'error');
+                    return;
+                  }
+                  handleAuthSuccess(loginData.user);
                   return;
                 }
               } catch (fetchErr) {
@@ -705,21 +698,14 @@
                 const loginRes = await fetch('/api/v1/auth/google-login', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    email: profile.email,
-                    name: profile.name || profile.given_name || profile.email.split('@')[0],
-                    avatar: profile.picture || '/avatars/p1.jpg',
-                    credential: response.credential
-                  })
+                  body: JSON.stringify({ idToken: response.credential })
                 });
-                const loginData = await loginRes.json();
-                const userObj = (loginData && loginData.user) ? loginData.user : {
-                  name: profile.name || profile.email.split('@')[0],
-                  email: profile.email,
-                  avatar: profile.picture || '/avatars/p1.jpg',
-                  provider: 'google'
-                };
-                handleAuthSuccess(userObj);
+                const loginData = await loginRes.json().catch(() => null);
+                if (!loginRes.ok || !loginData || !loginData.user) {
+                  showAlert((loginData && loginData.message) || 'Google sign-in could not be verified.', 'error');
+                  return;
+                }
+                handleAuthSuccess(loginData.user);
                 return;
               } catch (e) {
                 console.warn('JWT parse warn:', e);
@@ -767,19 +753,13 @@
             fetch('/api/v1/auth/google-login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: profile.email,
-                name: profile.name || profile.given_name || profile.email.split('@')[0],
-                avatar: profile.picture || '/avatars/p1.jpg',
-                accessToken: accessToken
-              })
+              body: JSON.stringify({ accessToken })
             }).then(r => r.json()).then(data => {
-              const userObj = (data && data.user) ? data.user : {
-                name: profile.name || profile.email.split('@')[0],
-                email: profile.email,
-                avatar: profile.picture || '/avatars/p1.jpg',
-                provider: 'google'
-              };
+              if (!data || !data.user) {
+                showAlert((data && data.message) || 'Google sign-in could not be verified.', 'error');
+                return;
+              }
+              const userObj = data.user;
               handleAuthSuccess(userObj);
               // If user arrived here in external browser from Android APK, bounce back into the app!
               if (/android/i.test(navigator.userAgent) && !window.AuraNative) {
@@ -817,21 +797,21 @@
   // We register/login it on the server (so it gets a real account) and then open the app.
   let nativeAuthBusy = false;
   window.__handleNativeAuthCallback = async function(userData) {
-    if (!userData || !userData.email) {
+    if (!userData || (!userData.idToken && !userData.email)) {
       showAlert('Could not read the selected Google account. Please try again.', 'error');
       return;
     }
     if (nativeAuthBusy) return;
     nativeAuthBusy = true;
-    showAlert('Signing in as ' + userData.email + '...', 'success');
-    let userObj = userData;
+    showAlert('Verifying your Google account...', 'success');
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const timer = setTimeout(() => ctrl.abort(), 15000);
       const res = await fetch('/api/v1/auth/google-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          idToken: userData.idToken || undefined,
           email: userData.email,
           name: userData.name,
           avatar: userData.avatar
@@ -840,13 +820,16 @@
       });
       clearTimeout(timer);
       const data = await res.json().catch(() => null);
-      if (data && data.user) userObj = { ...userData, ...data.user, provider: 'google' };
+      nativeAuthBusy = false;
+      if (!res.ok || !data || !data.user) {
+        showAlert((data && data.message) || 'Google sign-in could not be verified.', 'error');
+        return;
+      }
+      handleAuthSuccess({ ...data.user, provider: 'google' });
     } catch (e) {
-      // Server unreachable: still let the user in with the account they picked.
-      console.warn('google-login request failed, continuing locally:', e);
+      nativeAuthBusy = false;
+      showAlert('Could not reach the server to verify your Google account. Check your internet and try again.', 'error');
     }
-    nativeAuthBusy = false;
-    handleAuthSuccess(userObj);
   };
 
   // Shown when the phone-side sign-in fails or is cancelled.
@@ -1249,21 +1232,6 @@
               if (emInput) emInput.value = email;
               return;
             }
-            // Seamless Instant Account Creation Fallback if email delivery is unavailable
-            showAlert('Activating account directly for ' + email + '...', 'success');
-            try {
-              const directRes = await fetch('/api/v1/auth/google-login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, name: email.split('@')[0] })
-              });
-              const directData = await directRes.json();
-              if (directRes.ok && directData.user) {
-                showAlert('Account registered successfully! Logging you in...', 'success');
-                setTimeout(() => handleAuthSuccess(directData.user), 500);
-                return;
-              }
-            } catch {}
             showAlert(errText, 'error');
             regSubmitBtn.disabled = false;
             regSubmitBtn.innerHTML = `<span>Create Account</span>`;
