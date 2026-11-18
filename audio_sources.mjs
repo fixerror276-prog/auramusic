@@ -25,8 +25,8 @@ const INVIDIOUS_INSTANCES = splitList(
 const RELATED_TIMEOUT_MS = 4000;
 const RELATED_TTL_MS = 30 * 60 * 1000;
 const YTDL_TIMEOUT_MS = 4000;
-const PORTABLE_TIMEOUT_MS = 3500;
-const HEDGE_DELAY_MS = 300;                   // off-serverless: give ytdl a head start, then race fallbacks
+const PORTABLE_TIMEOUT_MS = 3000;  // faster timeout for Piped/Invidious
+const HEDGE_DELAY_MS = 0;          // race ALL sources simultaneously – fastest wins
 const YTDL_TTL_MS = 4 * 60 * 60 * 1000;      // googlevideo URLs live ~6h
 const PORTABLE_TTL_MS = 60 * 60 * 1000;
 
@@ -209,41 +209,33 @@ export function warmAudio(client, ids) {
 }
 
 // Returns { streamUrl, source } or null.
-// The direct (ytdl) lookup and the Piped/Invidious lookup run at the same time and the first
-// URL that will actually play for this client wins, instead of waiting for one to fail first.
+// Race ytdl + ALL Piped/Invidious simultaneously – whichever resolves first wins.
+// This guarantees the fastest possible response regardless of which source is healthy.
 export async function resolveAudio(client, id, clientIp) {
-  let ytdlUsable = false;
+  const cached_portable = getCached(`portable:${id}`);
+  if (cached_portable) {
+    return { streamUrl: cached_portable.url, source: cached_portable.source };
+  }
+  const cached_ytdl = getCached(`ytdl:${id}`);
+  if (cached_ytdl && urlWorksForClient(cached_ytdl, clientIp)) {
+    return { streamUrl: cached_ytdl, source: 'ytdl' };
+  }
 
-  const ytdlPromise = getYtdlUrl(client, id).catch(e => {
-    console.warn(`[AUDIO] ytdl failed for ${id}: ${e.message}`);
+  // Fire ALL sources at once — first useful URL wins
+  const ytdlResult = getYtdlUrl(client, id).then(url => {
+    if (url && urlWorksForClient(url, clientIp)) return { streamUrl: url, source: 'ytdl' };
     return null;
-  });
-  const ytdlResult = ytdlPromise.then(url => {
-    if (url && urlWorksForClient(url, clientIp)) {
-      ytdlUsable = true;
-      return { streamUrl: url, source: 'ytdl' };
-    }
-    return null;
-  });
+  }).catch(() => null);
 
-  // On serverless hosts the ytdl URL rarely works for the client, so start the fallback
-  // immediately. Elsewhere ytdl is preferred: only start the fallback if it is slow or unusable.
-  const hedgeMs = looksLikeDatacenter() ? 0 : HEDGE_DELAY_MS;
-  const portableResult = new Promise(resolve => setTimeout(resolve, hedgeMs))
-    .then(async () => {
-      if (ytdlUsable) return null;
-      const p = await getPortable(id).catch(e => {
-        console.warn(`[AUDIO] fallback instances failed for ${id}: ${e.message}`);
-        return null;
-      });
-      return p ? { streamUrl: p.url, source: p.source } : null;
-    });
+  const portableResult = getPortable(id).then(p =>
+    p ? { streamUrl: p.url, source: p.source } : null
+  ).catch(() => null);
 
-  const winner = await firstUseful([ytdlResult, portableResult]);
+  const winner = await firstUseful([portableResult, ytdlResult]);
   if (winner) return winner;
 
-  // Last resort: the ytdl URL even though it may be locked to another IP.
-  const ytdlUrl = await ytdlPromise;
+  // Last resort: ytdl URL even if IP-locked (better than nothing)
+  const ytdlUrl = await getCached(`ytdl:${id}`) || await getYtdlUrl(client, id).catch(() => null);
   if (ytdlUrl) return { streamUrl: ytdlUrl, source: 'ytdl-ip-mismatch' };
   return null;
 }

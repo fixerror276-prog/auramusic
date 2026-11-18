@@ -41,24 +41,18 @@
   function warmVideoId(videoId) {
     if (!videoId || warmedIds.has(videoId)) return;
     warmedIds.add(videoId);
+    // Fire warm request to server so audio URL is pre-resolved & cached
     fetch('/api/yt/warm?id=' + encodeURIComponent(videoId)).catch(() => {});
   }
 
-  // Intercept play events to warm up the NEXT songs in the queue
+  // Pre-warm next songs from the queue whenever audio plays
   window.addEventListener('play', function(e) {
     if (e.target && e.target.tagName === 'AUDIO') {
-      const song = getCurrentSong();
-      if (song) {
-        // Warm current
-        const vid = song.videoId || (song.id && song.id.replace(/^yt[-_]/, ''));
-        if (vid) warmVideoId(vid);
-      }
-      // Warm next songs from queue
+      // Warm next 3 songs in queue
       try {
         const queue = JSON.parse(localStorage.getItem('auramusic_queue') || '[]');
         const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
-        const next = queue.slice(idx + 1, idx + 4);
-        next.forEach(s => {
+        queue.slice(idx + 1, idx + 4).forEach(s => {
           const v = s.videoId || (s.id && s.id.replace(/^yt[-_]/, ''));
           if (v) warmVideoId(v);
         });
@@ -68,6 +62,7 @@
 
   // ── 2. Recently Played: record every song to server + local ──────────────
   const RP_KEY = 'aura_recently_played_local';
+
   function recordRecentlyPlayed(song) {
     if (!song || !song.name) return;
     const uid = getUserId();
@@ -86,14 +81,40 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: uid, song })
     }).catch(() => {});
+
+    // Pre-warm the song's stream immediately on tap
+    const vid = song.videoId || (song.id && song.id.replace(/^yt[-_]/, ''));
+    if (vid) warmVideoId(vid);
   }
 
-  // Hook into audio play to record recently played
-  window.addEventListener('play', function(e) {
-    if (e.target && e.target.tagName === 'AUDIO') {
+  // ── KEY FIX: Watch localStorage for auramusic_current_song changes ───────
+  // This fires the MOMENT a user taps a song (search result, playlist, home),
+  // not just when audio starts. So Recently Played is instantly updated.
+  let _lastTrackedSongId = null;
+
+  function checkSongChange() {
+    try {
       const song = getCurrentSong();
-      if (song) recordRecentlyPlayed(song);
-    }
+      if (!song) return;
+      const sid = song.id || song.videoId || song.name;
+      if (sid && sid !== _lastTrackedSongId) {
+        _lastTrackedSongId = sid;
+        recordRecentlyPlayed(song);
+      }
+    } catch {}
+  }
+
+  // Poll every 800ms (fast enough to catch taps instantly)
+  setInterval(checkSongChange, 800);
+
+  // Also hook storage event for cross-tab detection
+  window.addEventListener('storage', function(e) {
+    if (e.key === 'auramusic_current_song') checkSongChange();
+  });
+
+  // Also fire on audio play event as backup
+  window.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'AUDIO') checkSongChange();
   }, true);
 
   // ── 3. Add-to-Playlist Modal ─────────────────────────────────────────────
@@ -373,21 +394,7 @@
   observer.observe(document.body, { childList: true, subtree: true });
 
   // ── 8. Record recently played when song changes in localStorage ───────────
-  let _lastSongId = null;
-  setInterval(function() {
-    try {
-      const song = getCurrentSong();
-      if (!song) return;
-      const sid = song.id || song.videoId;
-      if (sid && sid !== _lastSongId) {
-        _lastSongId = sid;
-        recordRecentlyPlayed(song);
-        // Pre-warm the audio stream
-        const vid = song.videoId || (song.id && song.id.replace(/^yt[-_]/, ''));
-        if (vid) warmVideoId(vid);
-      }
-    } catch {}
-  }, 1500);
+  // (Handled above by checkSongChange polling at 800ms intervals)
 
   // ── 9. Right-click context menu (alternative ATP access) ─────────────────
   attachAddToPlaylistContextMenu();

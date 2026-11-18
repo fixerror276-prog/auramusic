@@ -1085,40 +1085,59 @@ async function searchYouTube(query) {
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
         if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
 
-        // json=1 mode: tell the player where to fetch the audio from.
-        if (parsedUrl.searchParams.get('json') === '1') {
-          // 1) A direct link, if it will play from the client's own IP (e.g. server and phone on one network).
-          // 2) Otherwise stream through this server (works from any network, supports seeking).
-          // 3) If YouTube extraction is blocked here, fall back to Piped/Invidious.
-          try {
-            const direct = await getDirectAudioUrl(ytAudioClient, cleanId);
-            if (urlWorksForClient(direct, getClientIp(req))) {
-              return sendJson(res, 200, { streamUrl: direct, source: 'ytdl' });
+        const clientIp = getClientIp(req);
+
+        // ── FAST PATH: resolve best audio URL, race all sources simultaneously ──
+        // Kick off both ytdl and Piped/Invidious at the same time.
+        // Whichever returns first, wins. For Piped URLs (portable CDN) we redirect
+        // the browser directly — zero proxy overhead, instant playback.
+        const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
+
+        if (resolved?.streamUrl) {
+          const src = resolved.source || '';
+          const isPortable = src.startsWith('piped:') || src.startsWith('invidious:');
+
+          // json=1 → return URL for the player to use directly
+          if (parsedUrl.searchParams.get('json') === '1') {
+            return sendJson(res, 200, { streamUrl: resolved.streamUrl, source: src });
+          }
+
+          // Portable CDN URLs: 307 redirect so the browser streams directly (fastest)
+          if (isPortable && !parsedUrl.searchParams.get('proxy')) {
+            res.writeHead(307, {
+              'Location': resolved.streamUrl,
+              'Cache-Control': 'private, max-age=120',
+              'Access-Control-Allow-Origin': '*'
+            });
+            return res.end();
+          }
+
+          // ytdl IP-matched URL: also redirect directly
+          if (src === 'ytdl' && urlWorksForClient(resolved.streamUrl, clientIp)) {
+            if (parsedUrl.searchParams.get('json') !== '1') {
+              res.writeHead(307, {
+                'Location': resolved.streamUrl,
+                'Cache-Control': 'private, max-age=120',
+                'Access-Control-Allow-Origin': '*'
+              });
+              return res.end();
             }
-            return sendJson(res, 200, { streamUrl: `/api/yt/stream?id=${encodeURIComponent(cleanId)}`, source: 'proxy' });
-          } catch (e) {
-            console.warn(`[AUDIO] direct lookup failed for ${cleanId}: ${e.message}`);
           }
-          const result = await resolveAudio(ytAudioClient, cleanId, getClientIp(req));
-          if (result?.streamUrl) {
-            return sendJson(res, 200, { streamUrl: result.streamUrl, source: result.source });
+
+          // Otherwise proxy through server (IP-locked ytdl URL)
+          try {
+            const served = await proxyAudio(req, res, {
+              getUrl: () => Promise.resolve(resolved.streamUrl),
+              forget: () => forgetDirectAudioUrl(cleanId)
+            });
+            if (served) return;
+          } catch (err) {
+            console.warn(`[AUDIO] proxy failed for ${cleanId}: ${err.message}`);
+            if (res.headersSent) return res.end();
           }
-          return sendJson(res, 404, { error: 'Stream not found' });
         }
 
-        // Proxy stream mode: short Range chunks through this server.
-        try {
-          const served = await proxyAudio(req, res, {
-            getUrl: () => getDirectAudioUrl(ytAudioClient, cleanId),
-            forget: () => forgetDirectAudioUrl(cleanId)
-          });
-          if (served) return;
-        } catch (err) {
-          console.warn(`[AUDIO] proxy failed for ${cleanId}: ${err.message}`);
-          if (res.headersSent) return res.end();
-        }
-
-        // Last resort: let ytdl download and pipe the whole file (no seeking).
+        // ── LAST RESORT: ytdl direct download pipe ─────────────────────────
         try {
           const dlStream = ytAudioClient.download(`https://www.youtube.com/watch?v=${cleanId}`, {
             filter: { hasAudio: true, hasVideo: false },
@@ -1413,9 +1432,10 @@ async function searchYouTube(query) {
       // ─── Stream warm-up endpoint ─────────────────────────────────────────
       // GET /api/yt/warm?id=VIDEOID  - pre-resolve audio URL and cache it
       if (pathname === '/api/yt/warm' && req.method === 'GET') {
-        const videoId = parsedUrl.searchParams.get('id') || '';
+        const videoId = (parsedUrl.searchParams.get('id') || '').replace(/^yt[-_]/, '').trim();
         if (videoId) {
-          warmAudio(videoId).catch(() => {});
+          // Race ytdl + Piped/Invidious simultaneously, cache both results
+          warmAudio(ytAudioClient, [videoId]);
         }
         return sendJson(res, 200, { success: true });
       }
