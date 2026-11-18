@@ -86,7 +86,9 @@ function saveDatabase() {
     fs.writeFileSync(DB_FILE, JSON.stringify({
       users: memoryDb.users,
       playlists: memoryDb.playlists,
-      likes: memoryDb.likes
+      likes: memoryDb.likes,
+      recentlyPlayed: memoryDb.recentlyPlayed,
+      userTastes: memoryDb.userTastes
     }, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving database.json:', e);
@@ -100,7 +102,9 @@ const memoryDb = {
   rateLimits: {},
   activeSessions: {},
   playlists: dbData.playlists || {},
-  likes: dbData.likes || {}
+  likes: dbData.likes || {},
+  recentlyPlayed: dbData.recentlyPlayed || {},
+  userTastes: dbData.userTastes || {}
 };
 
 // --- Optional Redis persistence (Upstash / Vercel KV) ---
@@ -109,7 +113,7 @@ const memoryDb = {
 // whole state is loaded at the start of each API request and saved before the
 // response is sent (only if something changed).
 const STATE_KEY = 'auramusic:state:v1';
-const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes'];
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed'];
 
 function snapshotState() {
   return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
@@ -1273,6 +1277,24 @@ async function searchYouTube(query) {
               isLiked = true;
             }
             saveDatabase();
+
+            // ── Keep "❤️ Favorites" system playlist in sync ──
+            if (!memoryDb.playlists[userId]) memoryDb.playlists[userId] = [];
+            let favPl = memoryDb.playlists[userId].find(p => p._system === 'favorites');
+            if (!favPl) {
+              favPl = {
+                id: 'sys_favorites_' + userId,
+                _system: 'favorites',
+                name: '❤️ Favorites',
+                description: 'Songs you have liked – auto-updated',
+                songs: [],
+                createdAt: new Date().toISOString(),
+                isSystem: true
+              };
+              memoryDb.playlists[userId].push(favPl);
+            }
+            favPl.songs = memoryDb.likes[userId].slice();
+            saveDatabase();
           }
 
           return sendJson(res, 200, {
@@ -1283,8 +1305,122 @@ async function searchYouTube(query) {
         }
       }
 
-      if (pathname === '/api/admin/stats') {
-        return sendJson(res, 200, {
+      // ─── Recently Played API ───────────────────────────────────────────
+      // GET  /api/recently-played?userId=X          → returns last 50 songs
+      // POST /api/recently-played  { userId, song } → records a played song, keeps 50
+      if (pathname === '/api/recently-played') {
+        if (!memoryDb.recentlyPlayed) memoryDb.recentlyPlayed = {};
+
+        if (req.method === 'GET') {
+          const uid = parsedUrl.searchParams.get('userId') || 'guest';
+          return sendJson(res, 200, { success: true, songs: memoryDb.recentlyPlayed[uid] || [] });
+        }
+
+        if (req.method === 'POST') {
+          const body = await parseBody(req);
+          const uid = body.userId || 'guest';
+          const song = body.song;
+          if (song && (song.id || song.videoId || song.name)) {
+            if (!memoryDb.recentlyPlayed[uid]) memoryDb.recentlyPlayed[uid] = [];
+            const rp = memoryDb.recentlyPlayed[uid];
+            const songId = song.id || song.videoId || song.name;
+            // Remove duplicate if already in list
+            const idx = rp.findIndex(s => (s.id || s.videoId || s.name) === songId);
+            if (idx !== -1) rp.splice(idx, 1);
+            rp.unshift({ ...song, playedAt: new Date().toISOString() });
+            if (rp.length > 50) rp.pop();
+            saveDatabase();
+
+            // ── Auto-sync: also ensure "Recently Played" system playlist exists ──
+            if (!memoryDb.playlists[uid]) memoryDb.playlists[uid] = [];
+            let rpPlaylist = memoryDb.playlists[uid].find(p => p._system === 'recently_played');
+            if (!rpPlaylist) {
+              rpPlaylist = {
+                id: `sys_recently_played_${uid}`,
+                _system: 'recently_played',
+                name: '🕐 Recently Played',
+                description: 'Auto-updated with every song you play',
+                songs: [],
+                createdAt: new Date().toISOString(),
+                isSystem: true
+              };
+              memoryDb.playlists[uid].push(rpPlaylist);
+            }
+            // Keep recently-played playlist in sync (max 50)
+            const rpSongs = memoryDb.recentlyPlayed[uid];
+            rpPlaylist.songs = rpSongs.slice();
+            saveDatabase();
+          }
+          return sendJson(res, 200, { success: true });
+        }
+      }
+
+      // ─── Auto-Favorites: Like → Favorites playlist  ──────────────────────
+      // The /api/likes POST already handles the toggle; here we also keep
+      // the special "❤️ Favorites" system playlist in sync after every toggle.
+      // (Handled inline inside the likes block below via ensureFavPlaylist.)
+
+      // ─── Shuffle playlist  ───────────────────────────────────────────────
+      // GET /api/playlist/shuffle?userId=X&playlistId=Y   → shuffled songs array
+      if (pathname === '/api/playlist/shuffle') {
+        const uid = parsedUrl.searchParams.get('userId') || 'guest';
+        const plId = parsedUrl.searchParams.get('playlistId');
+        const playlists = memoryDb.playlists[uid] || [];
+        let songs = [];
+        if (plId === 'recently_played') {
+          songs = (memoryDb.recentlyPlayed[uid] || []).slice();
+        } else if (plId === 'favorites') {
+          songs = (memoryDb.likes[uid] || []).slice();
+        } else {
+          const pl = playlists.find(p => String(p.id || p._id) === plId);
+          songs = pl ? pl.songs.slice() : [];
+        }
+        // Fisher-Yates shuffle
+        for (let i = songs.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [songs[i], songs[j]] = [songs[j], songs[i]];
+        }
+        return sendJson(res, 200, { success: true, songs });
+      }
+
+      // ─── Add song to playlist (shorthand)  ──────────────────────────────
+      // POST /api/playlist/add-song { userId, playlistId, song }
+      if (pathname === '/api/playlist/add-song') {
+        if (req.method === 'POST') {
+          const body = await parseBody(req);
+          const uid = body.userId || 'guest';
+          const plId = String(body.playlistId || '');
+          const song = body.song;
+          if (!song) return sendJson(res, 400, { error: 'song required' });
+          if (!memoryDb.playlists[uid]) memoryDb.playlists[uid] = [];
+          const pl = memoryDb.playlists[uid].find(p => String(p.id || p._id) === plId);
+          if (!pl) return sendJson(res, 404, { error: 'Playlist not found' });
+          const songId = song.id || song.videoId;
+          const exists = pl.songs.some(s => (s.id || s.videoId) === songId);
+          if (!exists) { pl.songs.unshift(song); saveDatabase(); }
+          return sendJson(res, 200, { success: true, alreadyExists: exists, playlist: pl });
+        }
+      }
+
+      // ─── List user playlists (shorthand for the UI's selector)  ─────────
+      // GET /api/user/playlists?userId=X → returns all playlists for picker
+      if (pathname === '/api/user/playlists') {
+        const uid = parsedUrl.searchParams.get('userId') || 'guest';
+        const playlists = memoryDb.playlists[uid] || [];
+        return sendJson(res, 200, { success: true, playlists });
+      }
+
+      // ─── Stream warm-up endpoint ─────────────────────────────────────────
+      // GET /api/yt/warm?id=VIDEOID  - pre-resolve audio URL and cache it
+      if (pathname === '/api/yt/warm' && req.method === 'GET') {
+        const videoId = parsedUrl.searchParams.get('id') || '';
+        if (videoId) {
+          warmAudio(videoId).catch(() => {});
+        }
+        return sendJson(res, 200, { success: true });
+      }
+
+      if (pathname === '/api/admin/stats') {        return sendJson(res, 200, {
           success: true,
           stats: {
             totalUsers: memoryDb.users.length,

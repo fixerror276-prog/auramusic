@@ -1,11 +1,12 @@
-const CACHE_NAME = 'auramusic-v3.0';
+const CACHE_NAME = 'auramusic-v3.1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/logo.png',
   '/icon-192.png',
-  '/icon-512.png'
+  '/icon-512.png',
+  '/aura-smart.js'
 ];
 
 // Install: Cache core app shell

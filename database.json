@@ -41,7 +41,66 @@
       "createdAt": "2026-11-15T19:39:10.628Z"
     }
   ],
-  "playlists": {},
+  "playlists": {
+    "test@aura.com": [
+      {
+        "id": "sys_favorites_test@aura.com",
+        "_system": "favorites",
+        "name": "❤️ Favorites",
+        "description": "Songs you have liked – auto-updated",
+        "songs": [
+          {
+            "id": "yt_dQw4w9",
+            "name": "Rick Roll",
+            "artist": "Rick Astley"
+          }
+        ],
+        "createdAt": "2026-11-18T03:15:04.680Z",
+        "isSystem": true
+      }
+    ],
+    "raju@aura.com": [
+      {
+        "id": "sys_recently_played_raju@aura.com",
+        "_system": "recently_played",
+        "name": "🕐 Recently Played",
+        "description": "Auto-updated with every song you play",
+        "songs": [
+          {
+            "id": "yt_x2",
+            "name": "Kesariya",
+            "artist": "Arijit Singh",
+            "videoId": "x2",
+            "playedAt": "2026-11-18T03:16:34.201Z"
+          },
+          {
+            "id": "yt_x1",
+            "name": "Tum Hi Ho",
+            "artist": "Arijit Singh",
+            "videoId": "x1",
+            "playedAt": "2026-11-18T03:16:34.185Z"
+          }
+        ],
+        "createdAt": "2026-11-18T03:16:34.186Z",
+        "isSystem": true
+      },
+      {
+        "id": "sys_favorites_raju@aura.com",
+        "_system": "favorites",
+        "name": "❤️ Favorites",
+        "description": "Songs you have liked – auto-updated",
+        "songs": [
+          {
+            "id": "yt_x1",
+            "name": "Tum Hi Ho",
+            "artist": "Arijit Singh"
+          }
+        ],
+        "createdAt": "2026-11-18T03:16:34.211Z",
+        "isSystem": true
+      }
+    ]
+  },
   "likes": {
     "guest": [],
     "user_1794686694412": [],
@@ -328,6 +387,39 @@
           }
         ]
       }
+    ],
+    "test@aura.com": [
+      {
+        "id": "yt_dQw4w9",
+        "name": "Rick Roll",
+        "artist": "Rick Astley"
+      }
+    ],
+    "raju@aura.com": [
+      {
+        "id": "yt_x1",
+        "name": "Tum Hi Ho",
+        "artist": "Arijit Singh"
+      }
     ]
-  }
+  },
+  "recentlyPlayed": {
+    "raju@aura.com": [
+      {
+        "id": "yt_x2",
+        "name": "Kesariya",
+        "artist": "Arijit Singh",
+        "videoId": "x2",
+        "playedAt": "2026-11-18T03:16:34.201Z"
+      },
+      {
+        "id": "yt_x1",
+        "name": "Tum Hi Ho",
+        "artist": "Arijit Singh",
+        "videoId": "x1",
+        "playedAt": "2026-11-18T03:16:34.185Z"
+      }
+    ]
+  },
+  "userTastes": {}
 }
