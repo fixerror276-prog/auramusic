@@ -60,8 +60,32 @@
     }
   }, true);
 
-  // ── 2. Recently Played: record every song to server + local ──────────────
+  // ── 2. Recently Played: record ONLY when user explicitly taps a song ───
+  // (Auto-played subsequent songs in the queue will NOT be added to Recently Played)
   const RP_KEY = 'aura_recently_played_local';
+  let _userTappedSong = false;
+  let _tapTimeout = null;
+
+  function markUserTapped() {
+    _userTappedSong = true;
+    clearTimeout(_tapTimeout);
+    _tapTimeout = setTimeout(() => { _userTappedSong = false; }, 4000);
+  }
+
+  // Intercept taps/clicks on song cards, search result items, list rows, and play buttons
+  document.addEventListener('pointerdown', function(e) {
+    const card = e.target.closest('[class*="song"], [class*="track"], [class*="Card"], [class*="card"], [class*="item"], [data-song-id], [data-videoid], button');
+    if (card) {
+      markUserTapped();
+    }
+  }, true);
+
+  // Also listen to Enter key in search
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      markUserTapped();
+    }
+  }, true);
 
   function recordRecentlyPlayed(song) {
     if (!song || !song.name) return;
@@ -88,8 +112,7 @@
   }
 
   // ── KEY FIX: Watch localStorage for auramusic_current_song changes ───────
-  // This fires the MOMENT a user taps a song (search result, playlist, home),
-  // not just when audio starts. So Recently Played is instantly updated.
+  // Fires when user taps a song. ONLY records to Recently Played if user explicitly tapped it!
   let _lastTrackedSongId = null;
 
   function checkSongChange() {
@@ -99,20 +122,28 @@
       const sid = song.id || song.videoId || song.name;
       if (sid && sid !== _lastTrackedSongId) {
         _lastTrackedSongId = sid;
-        recordRecentlyPlayed(song);
+        // ONLY record to Recently Played if user tapped to play (not auto-played queue songs)
+        if (_userTappedSong) {
+          _userTappedSong = false;
+          recordRecentlyPlayed(song);
+        } else {
+          // Pre-warm the song even if auto-played
+          const vid = song.videoId || (song.id && song.id.replace(/^yt[-_]/, ''));
+          if (vid) warmVideoId(vid);
+        }
       }
     } catch {}
   }
 
-  // Poll every 800ms (fast enough to catch taps instantly)
-  setInterval(checkSongChange, 800);
+  // Poll every 500ms for instant tap detection
+  setInterval(checkSongChange, 500);
 
   // Also hook storage event for cross-tab detection
   window.addEventListener('storage', function(e) {
     if (e.key === 'auramusic_current_song') checkSongChange();
   });
 
-  // Also fire on audio play event as backup
+  // Also fire on audio play event
   window.addEventListener('play', function(e) {
     if (e.target && e.target.tagName === 'AUDIO') checkSongChange();
   }, true);

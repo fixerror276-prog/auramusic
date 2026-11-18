@@ -3,14 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Ytdl, SearchType } from '@distube/ytdl-core';
-const ytAudioClient = new Ytdl();
+import { Ytdl, SearchType, Client } from '@distube/ytdl-core';
+const ytAudioClient = new Ytdl({
+  clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded]
+});
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
+import { resolveFastAudio, resolveSaavnAudio } from './fast_audio.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -768,7 +771,20 @@ async function trendingIndian() {
       if (v && !seen.has(v.videoId)) { seen.add(v.videoId); out.push(v); }
     }
   }
-  if (out.length) trendingCache = { at: Date.now(), data: out };
+  if (out.length) {
+    // Fast enrich top 12 trending songs with direct 320kbps CDN stream URLs
+    await Promise.all(out.slice(0, 12).map(async song => {
+      try {
+        const fast = await resolveSaavnAudio(song.name, song.artist);
+        if (fast?.streamUrl) {
+          song.streamUrl = fast.streamUrl;
+          song.url = fast.streamUrl;
+          song.source = 'AuraMusic Lossless 320k';
+        }
+      } catch (_) {}
+    }));
+    trendingCache = { at: Date.now(), data: out };
+  }
   return out;
 }
 
@@ -858,6 +874,18 @@ async function searchYouTube(query) {
   }
 
   if (songs.length > 0) {
+    // Fast enrich top 8 search hits with direct 320kbps CDN stream URLs
+    await Promise.all(songs.slice(0, 8).map(async song => {
+      try {
+        const fast = await resolveSaavnAudio(song.name, song.artist);
+        if (fast?.streamUrl) {
+          song.streamUrl = fast.streamUrl;
+          song.url = fast.streamUrl;
+          song.source = 'AuraMusic Lossless 320k';
+        }
+      } catch (_) {}
+    }));
+
     searchCache.set(norm, { time: Date.now(), data: songs });
     // Resolve stream URLs for the top hits in the background so tapping a song starts instantly.
     warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
@@ -1060,6 +1088,18 @@ async function searchYouTube(query) {
 
         const queue = pool.slice(0, limit).map(toSong);
 
+        // Fast enrich next songs with direct 320k Saavn CDN streamUrls
+        await Promise.all(queue.slice(0, 5).map(async song => {
+          try {
+            const fast = await resolveSaavnAudio(song.name, song.artist);
+            if (fast?.streamUrl) {
+              song.streamUrl = fast.streamUrl;
+              song.url = fast.streamUrl;
+              song.source = 'AuraMusic Lossless 320k';
+            }
+          } catch (_) {}
+        }));
+
         return sendJson(res, 200, {
           status: 'success',
           based_on: userTaste && dominantArtists.length ? 'recent_taste' : 'trending',
@@ -1085,12 +1125,30 @@ async function searchYouTube(query) {
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
         if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
 
+        const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || '';
+        const qArtist = parsedUrl.searchParams.get('artist') || '';
+
+        // ── TIER 1: Instant JioSaavn 320kbps HD CDN (<250ms response, zero buffering) ──
+        try {
+          const fast = await resolveFastAudio(cleanId, qTitle, qArtist);
+          if (fast?.streamUrl) {
+            if (parsedUrl.searchParams.get('json') === '1') {
+              return sendJson(res, 200, { streamUrl: fast.streamUrl, source: fast.source });
+            }
+            res.writeHead(307, {
+              'Location': fast.streamUrl,
+              'Cache-Control': 'public, max-age=86400',
+              'Access-Control-Allow-Origin': '*'
+            });
+            return res.end();
+          }
+        } catch (e) {
+          console.warn(`[FAST_AUDIO] lookup warning for ${cleanId}: ${e.message}`);
+        }
+
         const clientIp = getClientIp(req);
 
-        // ── FAST PATH: resolve best audio URL, race all sources simultaneously ──
-        // Kick off both ytdl and Piped/Invidious at the same time.
-        // Whichever returns first, wins. For Piped URLs (portable CDN) we redirect
-        // the browser directly — zero proxy overhead, instant playback.
+        // ── TIER 2: YouTube Audio (Client.Tv / Client.VisionOS bypasses bot checks) ──
         const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
 
         if (resolved?.streamUrl) {

@@ -7,10 +7,16 @@
   "scripts": {
     "start": "node server.mjs"
   },
-  "keywords": ["auramusic", "music-player", "hifi", "streaming"],
+  "keywords": [
+    "auramusic",
+    "music-player",
+    "hifi",
+    "streaming"
+  ],
   "author": "Google DeepMind Agent",
   "license": "ISC",
   "dependencies": {
-    "@distube/ytdl-core": "^5.2.1"
+    "@distube/ytdl-core": "^5.2.1",
+    "crypto-js": "^4.2.0"
   }
 }
