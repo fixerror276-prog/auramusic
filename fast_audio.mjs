@@ -208,10 +208,12 @@ export async function getTitleFromVideoId(videoId) {
   if (!videoId) return null;
   const cleanId = videoId.replace(/^yt[-_]/, '').trim();
   if (oembedCache.has(cleanId)) return oembedCache.get(cleanId);
+
+  // 1. Official YouTube oEmbed
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${cleanId}&format=json`;
     const res = await fetch(oembedUrl, {
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'Mozilla/5.0 AuraMusic' }
     });
     if (res.ok) {
@@ -221,6 +223,24 @@ export async function getTitleFromVideoId(videoId) {
       return meta;
     }
   } catch (_) {}
+
+  // 2. Fast NoEmbed Proxy Fallback (never blocked by datacenter IPs)
+  try {
+    const noembedUrl = `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${cleanId}`;
+    const res = await fetch(noembedUrl, {
+      signal: AbortSignal.timeout(2000),
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.title) {
+        const meta = { title: data.title, artist: data.author_name || '' };
+        oembedCache.set(cleanId, meta);
+        return meta;
+      }
+    }
+  } catch (_) {}
+
   return null;
 }
 

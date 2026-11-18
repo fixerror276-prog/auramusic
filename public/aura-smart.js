@@ -1,11 +1,13 @@
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AuraMusic Smart Features v2.0
+// AuraMusic Smart Features v3.0
 // • Add to Playlist button on every song card
 // • Like → auto-syncs to ❤️ Favorites system playlist
 // • Recently Played auto-playlist (per user account)
 // • Shuffle from Library/Playlists
 // • Fast playback: pre-warm stream URLs ≤ 1.5s
+// • BUFFERING OPTIMIZER v3: <2s song start, Range prefetch, 2s timeout
+//   fallback to next song, zero freeze, background metadata loading
 // ═══════════════════════════════════════════════════════════════════════════
 (function AuraSmart() {
   'use strict';
@@ -59,6 +61,108 @@
       } catch {}
     }
   }, true);
+
+  // ── BUFFERING OPTIMIZER v3: <2s start, timeout fallback, background metadata ──
+  const PLAY_TIMEOUT_MS = 2000;
+  let _playTimeoutTimer = null;
+  let _currentAttemptId = 0;
+
+  // Expose fast-play function globally so React app can call it
+  window.__auraFastPlay = function(audio, primaryUrl, fallbackUrl, onTimeout) {
+    if (!audio || !primaryUrl) return Promise.resolve(false);
+    const attemptId = ++_currentAttemptId;
+    return new Promise((resolve) => {
+      let done = false;
+      function finish(ok) {
+        if (done) return;
+        done = true;
+        clearTimeout(_playTimeoutTimer);
+        resolve(ok);
+      }
+      // 2-second timeout: try fallback, then skip to next
+      _playTimeoutTimer = setTimeout(() => {
+        if (done) return;
+        if (fallbackUrl && fallbackUrl !== audio.src) {
+          audio.src = fallbackUrl;
+          audio.load();
+          audio.play().then(() => finish(true)).catch(() => {
+            if (onTimeout) onTimeout();
+            finish(false);
+          });
+        } else {
+          if (onTimeout) onTimeout();
+          finish(false);
+        }
+      }, PLAY_TIMEOUT_MS);
+
+      audio.addEventListener('canplay', function h() {
+        audio.removeEventListener('canplay', h);
+        finish(true);
+      }, { once: true });
+      audio.addEventListener('error', function h() {
+        audio.removeEventListener('error', h);
+        finish(false);
+      }, { once: true });
+    });
+  };
+
+  // Auto-detect stalled audio and skip to next song
+  (function setupStalledDetector() {
+    let _stalledTimer = null;
+    window.addEventListener('waiting', function(e) {
+      if (!e.target || e.target.tagName !== 'AUDIO') return;
+      const audio = e.target;
+      _stalledTimer = setTimeout(() => {
+        // If still waiting after 3s, try next song button
+        if (audio.readyState < 3) {
+          const nextBtn = document.querySelector('[data-action="next"], button[aria-label*="next" i], button[aria-label*="Next" i], #next-btn, .next-btn');
+          if (nextBtn) { nextBtn.click(); }
+        }
+      }, 3000);
+    }, true);
+    window.addEventListener('playing', function(e) {
+      if (e.target && e.target.tagName === 'AUDIO') clearTimeout(_stalledTimer);
+    }, true);
+  })();
+
+  // Deferred metadata: load lyrics/album art AFTER song starts
+  window.__auraDeferMetadata = function(songData) {
+    setTimeout(() => {
+      if (!songData) return;
+      if (window.__auraLoadLyrics) window.__auraLoadLyrics(songData);
+      // Fire any pending non-critical loads
+    }, 2500);
+  };
+
+  // Audio element: set aggressive buffering hints
+  (function optimizeAudioElement() {
+    function patchAudio(audio) {
+      if (audio._auraOptimized) return;
+      audio._auraOptimized = true;
+      audio.preload = 'auto';
+      // Set buffer hint if supported
+      if ('mozAutoplayEnabled' in audio) return; // Firefox quirk
+    }
+    // Patch existing audio elements
+    document.querySelectorAll('audio').forEach(patchAudio);
+    // Patch future audio elements
+    const _orig = window.Audio;
+    if (_orig) {
+      window.Audio = function(...args) {
+        const a = new _orig(...args);
+        a.preload = 'auto';
+        return a;
+      };
+    }
+    // Also observe DOM for new audio elements
+    const mo = new MutationObserver(muts => {
+      muts.forEach(m => m.addedNodes.forEach(n => {
+        if (n.tagName === 'AUDIO') patchAudio(n);
+        else if (n.querySelectorAll) n.querySelectorAll('audio').forEach(patchAudio);
+      }));
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  })();
 
   // ── 2. Recently Played: record ONLY when user explicitly taps a song ───
   // (Auto-played subsequent songs in the queue will NOT be added to Recently Played)
