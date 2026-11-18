@@ -13,7 +13,7 @@ import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS } from './mus
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
-import { resolveFastAudio, resolveSaavnAudio } from './fast_audio.mjs';
+import { resolveFastAudio, resolveSaavnAudio, searchSongsSaavnDev } from './fast_audio.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -892,6 +892,18 @@ async function searchYouTube(query) {
   }
   return songs;
 }
+
+      // ============================================================================
+      // Fast Saavn.dev Search API Endpoint: /api/search/songs?query={NAME}&limit=10
+      // Returns exact saavn.dev format: response.data.results[n].downloadUrl[last].url
+      // With pipedapi.kavin.rocks fallback
+      // ============================================================================
+      if (pathname === '/api/search/songs') {
+        const query = parsedUrl.searchParams.get('query') || parsedUrl.searchParams.get('q') || '';
+        const limit = parseInt(parsedUrl.searchParams.get('limit') || '10', 10);
+        const data = await searchSongsSaavnDev(query, limit);
+        return sendJson(res, 200, data);
+      }
 
       // App Proxy / Search / Lyrics / Playlists APIs (Preserving existing website features)
       if (pathname === '/api/yt/search') {
