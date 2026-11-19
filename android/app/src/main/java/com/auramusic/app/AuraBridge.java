@@ -37,4 +37,32 @@ public class AuraBridge {
             });
         }
     }
+
+    // Identifies that this client is the native Android App
+    @JavascriptInterface
+    public boolean isAndroidApp() {
+        return true;
+    }
+
+    // Opens APK download or external URL directly in device browser (Intent.ACTION_VIEW)
+    @JavascriptInterface
+    public void openBrowser(String url) {
+        MainActivity activity = MainActivity.getInstance();
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
+                activity.openExternalBrowser(url);
+            });
+        }
+    }
+
+    // Triggers native fullscreen force-update dialog from JS if needed
+    @JavascriptInterface
+    public void showNativeUpdateDialog(String title, String message, String apkUrl) {
+        MainActivity activity = MainActivity.getInstance();
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
+                activity.showUpdatePopup(title, message, apkUrl);
+            });
+        }
+    }
 }

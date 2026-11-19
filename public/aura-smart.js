@@ -1020,5 +1020,373 @@
     console.log('✅ AuraMusic Auto-Suggest loaded (2-char trigger, song+query hybrid)');
   })();
 
-  console.log('✅ AuraMusic Smart Features v3.1 loaded (Buffering Optimizer + Auto-Suggest + Taste Lock)');
+  // ── 14. Admin App Update Control + Android In-App Force Update Popup ───────
+  (function setupAppUpdateSystem() {
+    // ══════════════════════════════════════════════════════════════════════════
+    // A. ANDROID CLIENT CHECK & POPUP LOGIC
+    // Requirement: "Ye feature Sirf Android App me chalega.
+    // Web Browser (Website) se login karne wale ko ye Popup NAHI dikhana hai.
+    // If Platform == Android App THEN Check Popup, Else Ignore."
+    // ══════════════════════════════════════════════════════════════════════════
+    const isAndroidApp = !!(
+      window.AuraNative ||
+      window.__isAndroidApp ||
+      window.isAuraApp ||
+      (window.AuraNative && typeof window.AuraNative.isAndroidApp === 'function' && window.AuraNative.isAndroidApp())
+    );
+
+    if (isAndroidApp) {
+      console.log('📱 AuraMusic running inside Android App: Initializing Update Checker...');
+      
+      // Delay slightly for smooth post-splash startup
+      setTimeout(async function checkUpdate() {
+        try {
+          const res = await fetch('/api/app-update', { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data && data.success && data.update && data.update.enabled) {
+            const up = data.update;
+            const title = up.title || 'New Update Available!';
+            const message = up.message || 'Please update to get latest features & faster streaming.';
+            const apkUrl = up.apkUrl || 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk';
+
+            // 1. Try Native Android Dialog first
+            if (window.AuraNative && typeof window.AuraNative.showNativeUpdateDialog === 'function') {
+              window.AuraNative.showNativeUpdateDialog(title, message, apkUrl);
+            }
+
+            // 2. Also ensure Fullscreen In-App modal is active (Force Update)
+            showInAppFullscreenUpdateModal(title, message, apkUrl);
+          }
+        } catch (e) {
+          console.warn('[UPDATE CHECK ERROR]', e);
+        }
+      }, 800);
+    } else {
+      // Platform == Web Browser -> COMPLETELY IGNORE as requested!
+      console.log('🌐 AuraMusic running in Web Browser: Update popup ignored.');
+    }
+
+    function showInAppFullscreenUpdateModal(title, message, apkUrl) {
+      if (document.getElementById('aura-update-fullscreen-modal')) return;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'aura-update-fullscreen-modal';
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '9999999',
+        background: '#090A0F', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', padding: '24px',
+        textAlign: 'center', userSelect: 'none', fontFamily: 'Plus Jakarta Sans, sans-serif'
+      });
+
+      overlay.innerHTML = `
+        <div style="max-width: 420px; width: 100%; display: flex; flex-direction: column; align-items: center;">
+          <div style="width: 80px; height: 80px; border-radius: 24px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); display: flex; align-items: center; justify-content: center; font-size: 38px; margin-bottom: 24px; box-shadow: 0 12px 30px rgba(16, 185, 129, 0.2);">
+            🚀
+          </div>
+          <h1 style="font-size: 24px; font-weight: 800; color: #ffffff; margin: 0 0 12px 0; letter-spacing: -0.5px;">
+            ${escapeHtml(title)}
+          </h1>
+          <p style="font-size: 15px; color: #94A3B8; line-height: 1.6; margin: 0 0 32px 0;">
+            ${escapeHtml(message)}
+          </p>
+          <button id="aura-update-now-btn" style="width: 100%; padding: 16px; border-radius: 16px; background: #10B981; color: #000000; font-size: 15px; font-weight: 800; border: none; cursor: pointer; transition: transform 0.15s, opacity 0.15s; box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);">
+            UPDATE NOW
+          </button>
+          <div style="font-size: 12px; color: #64748B; margin-top: 20px;">
+            This update is required to continue using AuraMusic.
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      const btn = document.getElementById('aura-update-now-btn');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          btn.style.transform = 'scale(0.97)';
+          btn.style.opacity = '0.9';
+          setTimeout(() => { btn.style.transform = 'none'; btn.style.opacity = '1'; }, 150);
+
+          if (window.AuraNative && typeof window.AuraNative.openBrowser === 'function') {
+            window.AuraNative.openBrowser(apkUrl);
+          } else {
+            window.location.href = apkUrl;
+          }
+        });
+      }
+
+      // Block back button / background interaction (Force Update)
+      window.history.pushState(null, null, window.location.href);
+      window.addEventListener('popstate', function () {
+        window.history.pushState(null, null, window.location.href);
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // B. ADMIN DASHBOARD: "App Update Control" SECTION
+    // ══════════════════════════════════════════════════════════════════════════
+    let adminUpdateConfig = {
+      enabled: false,
+      title: 'New Update Available!',
+      message: 'Please update to get latest features & faster streaming.',
+      apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+    };
+
+    async function loadAdminUpdateConfig() {
+      try {
+        const res = await fetch('/api/admin/app-update');
+        if (res.ok) {
+          const d = await res.json();
+          if (d && d.update) adminUpdateConfig = Object.assign({}, adminUpdateConfig, d.update);
+        }
+      } catch (_) {}
+    }
+
+    function injectAdminUpdateTab() {
+      // Find admin nav tabs container in dashboard
+      const nav = document.querySelector('header + main, div[class*="admin"], nav[class*="space-x"]');
+      const tabsContainer = document.querySelector('.overflow-x-auto .flex.items-center.space-x-1, .overflow-x-auto .flex.items-center.space-x-2');
+      if (!tabsContainer || document.getElementById('tab-btn-app-update')) return;
+
+      const btn = document.createElement('button');
+      btn.id = 'tab-btn-app-update';
+      btn.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.04]';
+      btn.innerHTML = `
+        <span style="font-size: 14px;">📱</span>
+        <span>App Update Control</span>
+        <span id="aura-update-active-badge" class="text-[10px] px-1.5 py-0.5 rounded-full font-black ${adminUpdateConfig.enabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'}">
+          ${adminUpdateConfig.enabled ? 'ON' : 'OFF'}
+        </span>
+      `;
+
+      btn.addEventListener('click', function () {
+        // Deselect other buttons
+        tabsContainer.querySelectorAll('button').forEach(b => {
+          b.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.04]';
+        });
+        btn.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20';
+
+        renderAdminUpdateView();
+      });
+
+      tabsContainer.appendChild(btn);
+    }
+
+    function renderAdminUpdateView() {
+      // Find main admin content area
+      const mainArea = document.querySelector('main > div, main') || document.getElementById('root');
+      if (!mainArea) return;
+
+      // Hide all siblings in main container
+      const contentParent = document.querySelector('.max-w-7xl.w-full.mx-auto') || mainArea;
+      Array.from(contentParent.children).forEach(child => {
+        if (child.id === 'aura-admin-update-panel') {
+          child.style.display = 'block';
+        } else {
+          child.style.display = 'none';
+        }
+      });
+
+      let panel = document.getElementById('aura-admin-update-panel');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'aura-admin-update-panel';
+        panel.className = 'space-y-6 animate-fadeIn max-w-2xl';
+        contentParent.appendChild(panel);
+      }
+
+      panel.innerHTML = `
+        <div class="p-6 sm:p-8 rounded-3xl bg-[#0F1422] border border-white/[0.08] space-y-6 shadow-2xl">
+          <div>
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-xl text-emerald-400">
+                📱
+              </div>
+              <div>
+                <h2 class="text-lg font-black text-white flex items-center space-x-2">
+                  <span>App Update Control (Android APK)</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full ${adminUpdateConfig.enabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'} font-black uppercase">
+                    ${adminUpdateConfig.enabled ? 'Live Active' : 'Disabled'}
+                  </span>
+                </h2>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  Remotely trigger a Force Update popup in the Android app. Web browser users are unaffected.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <form id="aura-admin-update-form" class="space-y-5">
+            <!-- Toggle Switch -->
+            <div class="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-white/10 hover:border-emerald-500/30 transition-all">
+              <div>
+                <div class="text-sm font-bold text-white flex items-center space-x-2">
+                  <span>Show Update Popup to Users?</span>
+                  <span id="toggle-status-text" class="text-xs font-semibold ${adminUpdateConfig.enabled ? 'text-emerald-400' : 'text-slate-500'}">
+                    (${adminUpdateConfig.enabled ? 'ENABLED' : 'DISABLED'})
+                  </span>
+                </div>
+                <div class="text-xs text-slate-400 mt-0.5">
+                  When enabled, Android users will see a fullscreen update dialog on launch.
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="update-toggle-checkbox" class="sr-only peer" ${adminUpdateConfig.enabled ? 'checked' : ''}>
+                <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+              </label>
+            </div>
+
+            <!-- Fields Container (Activated/Visible when checked) -->
+            <div id="update-fields-container" class="space-y-4 transition-all duration-200" style="${adminUpdateConfig.enabled ? 'opacity: 1; pointer-events: auto;' : 'opacity: 0.45; pointer-events: none;'}">
+              <div>
+                <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Popup Title
+                </label>
+                <input type="text" id="update-input-title"
+                  value="${escapeHtml(adminUpdateConfig.title)}"
+                  placeholder="Example: New Update Available!"
+                  class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
+                  ${adminUpdateConfig.enabled ? '' : 'disabled'}>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Popup Message
+                </label>
+                <textarea id="update-input-message" rows="3"
+                  placeholder="Example: Please update to get latest features & faster streaming."
+                  class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all"
+                  ${adminUpdateConfig.enabled ? '' : 'disabled'}>${escapeHtml(adminUpdateConfig.message)}</textarea>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                  APK Download Link
+                </label>
+                <input type="url" id="update-input-apk"
+                  value="${escapeHtml(adminUpdateConfig.apkUrl)}"
+                  placeholder="Example: https://mywebsite.com/app/latest.apk"
+                  class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all font-mono text-xs"
+                  ${adminUpdateConfig.enabled ? '' : 'disabled'}>
+              </div>
+            </div>
+
+            <!-- Save Button & Feedback -->
+            <div class="pt-2 flex items-center justify-between">
+              <button type="submit" id="save-update-btn"
+                class="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 text-black font-extrabold text-sm uppercase tracking-wider hover:opacity-95 active:scale-95 shadow-lg shadow-emerald-500/25 transition-all cursor-pointer">
+                💾 Save Update Settings
+              </button>
+              <span id="update-save-status" class="text-xs font-bold text-emerald-400 opacity-0 transition-opacity"></span>
+            </div>
+          </form>
+        </div>
+      `;
+
+      // Form event listeners
+      const toggle = document.getElementById('update-toggle-checkbox');
+      const fieldsContainer = document.getElementById('update-fields-container');
+      const titleInput = document.getElementById('update-input-title');
+      const msgInput = document.getElementById('update-input-message');
+      const apkInput = document.getElementById('update-input-apk');
+      const toggleStatus = document.getElementById('toggle-status-text');
+      const form = document.getElementById('aura-admin-update-form');
+      const statusText = document.getElementById('update-save-status');
+
+      toggle.addEventListener('change', function () {
+        const isChecked = toggle.checked;
+        if (isChecked) {
+          fieldsContainer.style.opacity = '1';
+          fieldsContainer.style.pointerEvents = 'auto';
+          titleInput.removeAttribute('disabled');
+          msgInput.removeAttribute('disabled');
+          apkInput.removeAttribute('disabled');
+          toggleStatus.textContent = '(ENABLED)';
+          toggleStatus.className = 'text-xs font-semibold text-emerald-400';
+        } else {
+          fieldsContainer.style.opacity = '0.45';
+          fieldsContainer.style.pointerEvents = 'none';
+          titleInput.setAttribute('disabled', 'true');
+          msgInput.setAttribute('disabled', 'true');
+          apkInput.setAttribute('disabled', 'true');
+          toggleStatus.textContent = '(DISABLED)';
+          toggleStatus.className = 'text-xs font-semibold text-slate-500';
+        }
+      });
+
+      form.addEventListener('submit', async function (ev) {
+        ev.preventDefault();
+        const payload = {
+          enabled: toggle.checked,
+          title: titleInput.value.trim() || 'New Update Available!',
+          message: msgInput.value.trim() || 'Please update to get latest features & faster streaming.',
+          apkUrl: apkInput.value.trim() || 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+        };
+
+        const saveBtn = document.getElementById('save-update-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+
+        try {
+          const res = await fetch('/api/admin/app-update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (res.ok && result.success) {
+            adminUpdateConfig = payload;
+            const badge = document.getElementById('aura-update-active-badge');
+            if (badge) {
+              badge.textContent = payload.enabled ? 'ON' : 'OFF';
+              badge.className = `text-[10px] px-1.5 py-0.5 rounded-full font-black ${payload.enabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'}`;
+            }
+            statusText.textContent = '✓ Saved & Applied to Android App!';
+            statusText.style.opacity = '1';
+            setTimeout(() => { statusText.style.opacity = '0'; }, 3500);
+          } else {
+            alert('Failed to save: ' + (result.error || 'Server error'));
+          }
+        } catch (err) {
+          alert('Network error while saving update config: ' + err.message);
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '💾 Save Update Settings';
+        }
+      });
+    }
+
+    // Observe when admin panel is opened and inject tab
+    loadAdminUpdateConfig();
+    const adminObserver = new MutationObserver(function () {
+      injectAdminUpdateTab();
+    });
+    adminObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+    // When other tabs are clicked, hide custom panel and restore siblings
+    document.addEventListener('click', function (e) {
+      const tabBtn = e.target.closest('button');
+      if (tabBtn && tabBtn.id !== 'tab-btn-app-update' && tabBtn.closest('.overflow-x-auto')) {
+        const customPanel = document.getElementById('aura-admin-update-panel');
+        if (customPanel) customPanel.style.display = 'none';
+        const contentParent = document.querySelector('.max-w-7xl.w-full.mx-auto');
+        if (contentParent) {
+          Array.from(contentParent.children).forEach(c => {
+            if (c.id !== 'aura-admin-update-panel') c.style.display = '';
+          });
+        }
+      }
+    });
+
+    console.log('✅ AuraMusic App Update Control (Admin + Android logic) initialized.');
+  })();
+
+  console.log('✅ AuraMusic Smart Features v3.2 loaded (Buffering + Auto-Suggest + Taste Lock + App Update)');
 })();

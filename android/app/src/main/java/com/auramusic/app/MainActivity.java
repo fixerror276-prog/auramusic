@@ -246,6 +246,7 @@ public class MainActivity extends Activity {
 
         // Always load fresh URL so app reloads cleanly when opened
         webView.loadUrl(BuildConfig.APP_URL);
+        checkAppUpdate();
     }
 
     @Override
@@ -254,6 +255,144 @@ public class MainActivity extends Activity {
         webView.onResume();
         startPlaybackService();
         handleAuthDeepLink(getIntent());
+        checkAppUpdate();
+    }
+
+    public void openExternalBrowser(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not open browser for update", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private Dialog updatePopupDialog;
+
+    // Checks server for force update popup (Runs in background)
+    public void checkAppUpdate() {
+        new Thread(() -> {
+            try {
+                String baseUrl = BuildConfig.APP_URL;
+                if (baseUrl == null || baseUrl.isEmpty()) return;
+                if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                String apiUrl = baseUrl + "/api/app-update";
+                java.net.URL url = new java.net.URL(apiUrl);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(6000);
+                conn.setUseCaches(false);
+                if (conn.getResponseCode() == 200) {
+                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+
+                    JSONObject json = new JSONObject(sb.toString());
+                    if (json.optBoolean("success", false)) {
+                        JSONObject update = json.optJSONObject("update");
+                        if (update != null && update.optBoolean("enabled", false)) {
+                            String title = update.optString("title", "New Update Available!");
+                            String msg = update.optString("message", "Please update to get latest features & faster streaming.");
+                            String apkUrl = update.optString("apkUrl", "");
+                            if (!apkUrl.isEmpty()) {
+                                runOnUiThread(() -> showUpdatePopup(title, msg, apkUrl));
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) { }
+        }).start();
+    }
+
+    // Displays Fullscreen Force Update Dialog
+    public void showUpdatePopup(String title, String message, String apkUrl) {
+        if (isFinishing() || isDestroyed()) return;
+        if (updatePopupDialog != null && updatePopupDialog.isShowing()) {
+            return; // Already showing
+        }
+
+        updatePopupDialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        updatePopupDialog.setCancelable(false); // Force Update: user cannot back out or dismiss!
+        updatePopupDialog.setCanceledOnTouchOutside(false);
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(this);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setGravity(android.view.Gravity.CENTER);
+        root.setBackgroundColor(Color.parseColor("#090A0F"));
+        int pad = (int) (28 * getResources().getDisplayMetrics().density);
+        root.setPadding(pad, pad, pad, pad);
+
+        // Icon Container
+        android.widget.TextView iconView = new android.widget.TextView(this);
+        iconView.setText("🚀");
+        iconView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 64);
+        iconView.setGravity(android.view.Gravity.CENTER);
+        root.addView(iconView);
+
+        // Title View
+        android.widget.TextView titleView = new android.widget.TextView(this);
+        titleView.setText(title);
+        titleView.setTextColor(Color.WHITE);
+        titleView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 24);
+        titleView.setTypeface(null, android.graphics.Typeface.BOLD);
+        titleView.setGravity(android.view.Gravity.CENTER);
+        android.widget.LinearLayout.LayoutParams titleParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        titleParams.topMargin = (int) (20 * getResources().getDisplayMetrics().density);
+        root.addView(titleView, titleParams);
+
+        // Message View
+        android.widget.TextView msgView = new android.widget.TextView(this);
+        msgView.setText(message);
+        msgView.setTextColor(Color.parseColor("#94A3B8"));
+        msgView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        msgView.setGravity(android.view.Gravity.CENTER);
+        msgView.setLineSpacing(0, 1.25f);
+        android.widget.LinearLayout.LayoutParams msgParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        msgParams.topMargin = (int) (14 * getResources().getDisplayMetrics().density);
+        root.addView(msgView, msgParams);
+
+        // Update Now Button
+        android.widget.Button btn = new android.widget.Button(this);
+        btn.setText("UPDATE NOW");
+        btn.setTextColor(Color.parseColor("#000000"));
+        btn.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        btn.setTypeface(null, android.graphics.Typeface.BOLD);
+        btn.setBackgroundColor(Color.parseColor("#10B981")); // Emerald
+        android.widget.LinearLayout.LayoutParams btnParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (52 * getResources().getDisplayMetrics().density)
+        );
+        btnParams.topMargin = (int) (32 * getResources().getDisplayMetrics().density);
+        btn.setOnClickListener(v -> {
+            openExternalBrowser(apkUrl);
+        });
+        root.addView(btn, btnParams);
+
+        // Subtext notice
+        android.widget.TextView noticeView = new android.widget.TextView(this);
+        noticeView.setText("This update is required to continue enjoying lossless music.");
+        noticeView.setTextColor(Color.parseColor("#64748B"));
+        noticeView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
+        noticeView.setGravity(android.view.Gravity.CENTER);
+        android.widget.LinearLayout.LayoutParams noticeParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        noticeParams.topMargin = (int) (16 * getResources().getDisplayMetrics().density);
+        root.addView(noticeView, noticeParams);
+
+        updatePopupDialog.setContentView(root);
+        updatePopupDialog.show();
     }
 
     // Verified login needs Google's own chooser (set this to true once the Android OAuth client exists): it returns a signed ID token the server checks with Google.

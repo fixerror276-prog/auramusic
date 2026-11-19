@@ -76,7 +76,13 @@ function loadDatabase() {
       }
     ],
     playlists: {},
-    likes: {}
+    likes: {},
+    appUpdate: {
+      enabled: false,
+      title: 'New Update Available!',
+      message: 'Please update to get latest features & faster streaming.',
+      apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+    }
   };
 }
 
@@ -91,7 +97,8 @@ function saveDatabase() {
       playlists: memoryDb.playlists,
       likes: memoryDb.likes,
       recentlyPlayed: memoryDb.recentlyPlayed,
-      userTastes: memoryDb.userTastes
+      userTastes: memoryDb.userTastes,
+      appUpdate: memoryDb.appUpdate
     }, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving database.json:', e);
@@ -107,7 +114,13 @@ const memoryDb = {
   playlists: dbData.playlists || {},
   likes: dbData.likes || {},
   recentlyPlayed: dbData.recentlyPlayed || {},
-  userTastes: dbData.userTastes || {}
+  userTastes: dbData.userTastes || {},
+  appUpdate: dbData.appUpdate || {
+    enabled: false,
+    title: 'New Update Available!',
+    message: 'Please update to get latest features & faster streaming.',
+    apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+  }
 };
 
 // --- Optional Redis persistence (Upstash / Vercel KV) ---
@@ -116,7 +129,7 @@ const memoryDb = {
 // whole state is loaded at the start of each API request and saved before the
 // response is sent (only if something changed).
 const STATE_KEY = 'auramusic:state:v1';
-const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed'];
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'appUpdate'];
 
 function snapshotState() {
   return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
@@ -1584,8 +1597,52 @@ async function searchYouTube(query) {
             totalPlaylists: Object.values(memoryDb.playlists).flat().length,
             totalLikes: Object.values(memoryDb.likes).flat().length,
             cachedStreamsCount: 128,
-            database: 'Brevo SMTP Integrated Store'
+            database: 'Brevo SMTP Integrated Store',
+            appUpdate: memoryDb.appUpdate
           }
+        });
+      }
+
+      // ── App Update API (Public for Android APK / App check) ──
+      // GET /api/app-update
+      if (pathname === '/api/app-update' && req.method === 'GET') {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        return sendJson(res, 200, {
+          success: true,
+          update: memoryDb.appUpdate || {
+            enabled: false,
+            title: 'New Update Available!',
+            message: 'Please update to get latest features & faster streaming.',
+            apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+          }
+        });
+      }
+
+      // ── Admin App Update Control ──
+      // GET /api/admin/app-update -> fetch current config
+      if (pathname === '/api/admin/app-update' && req.method === 'GET') {
+        res.setHeader('Cache-Control', 'no-store');
+        return sendJson(res, 200, {
+          success: true,
+          update: memoryDb.appUpdate
+        });
+      }
+
+      // POST /api/admin/app-update -> save update config
+      if (pathname === '/api/admin/app-update' && req.method === 'POST') {
+        const body = await parseBody(req);
+        memoryDb.appUpdate = {
+          enabled: Boolean(body.enabled),
+          title: String(body.title || 'New Update Available!').trim(),
+          message: String(body.message || 'Please update to get latest features & faster streaming.').trim(),
+          apkUrl: String(body.apkUrl || '').trim() || 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+        };
+        saveDatabase();
+        console.log('[ADMIN] App Update config updated:', memoryDb.appUpdate);
+        return sendJson(res, 200, {
+          success: true,
+          message: 'App Update settings saved successfully',
+          update: memoryDb.appUpdate
         });
       }
 

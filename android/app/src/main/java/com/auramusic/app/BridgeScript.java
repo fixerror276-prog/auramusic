@@ -11,6 +11,8 @@ final class BridgeScript {
 
     static final String JS = """
 (function () {
+  window.__isAndroidApp = true;
+  window.isAuraApp = true;
   if (window.__auraBridge || !window.AuraNative) return;
   window.__auraBridge = true;
 
