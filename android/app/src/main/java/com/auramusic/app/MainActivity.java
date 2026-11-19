@@ -258,9 +258,18 @@ public class MainActivity extends Activity {
         checkAppUpdate();
     }
 
+    // Only plain https links may be opened (the page inside the WebView can call this too).
+    private static boolean isHttpsUrl(String url) {
+        return url != null && url.trim().toLowerCase(java.util.Locale.ROOT).startsWith("https://");
+    }
+
     public void openExternalBrowser(String url) {
+        if (!isHttpsUrl(url)) {
+            Toast.makeText(this, "Invalid update link", Toast.LENGTH_SHORT).show();
+            return;
+        }
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.trim()));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
         } catch (Exception e) {
@@ -294,18 +303,33 @@ public class MainActivity extends Activity {
                     JSONObject json = new JSONObject(sb.toString());
                     if (json.optBoolean("success", false)) {
                         JSONObject update = json.optJSONObject("update");
+                        boolean show = false;
+                        String title = "New Update Available!";
+                        String msg = "Please update to get latest features & faster streaming.";
+                        String apkUrl = "";
                         if (update != null && update.optBoolean("enabled", false)) {
-                            String title = update.optString("title", "New Update Available!");
-                            String msg = update.optString("message", "Please update to get latest features & faster streaming.");
-                            String apkUrl = update.optString("apkUrl", "");
-                            if (!apkUrl.isEmpty()) {
-                                runOnUiThread(() -> showUpdatePopup(title, msg, apkUrl));
-                            }
+                            title = update.optString("title", title);
+                            msg = update.optString("message", msg);
+                            apkUrl = update.optString("apkUrl", "");
+                            // Optional: only builds older than this number need the update (0 = every build).
+                            int minVersion = update.optInt("minVersionCode", 0);
+                            boolean needsUpdate = minVersion <= 0 || BuildConfig.VERSION_CODE < minVersion;
+                            show = needsUpdate && isHttpsUrl(apkUrl);
                         }
+                        final boolean showFinal = show;
+                        final String t = title, m = msg, u = apkUrl;
+                        // Admin turned it off (or this build is new enough): take the popup away.
+                        runOnUiThread(() -> { if (showFinal) showUpdatePopup(t, m, u); else hideUpdatePopup(); });
                     }
                 }
             } catch (Exception ignored) { }
         }).start();
+    }
+
+    private void hideUpdatePopup() {
+        if (updatePopupDialog != null && updatePopupDialog.isShowing()) {
+            try { updatePopupDialog.dismiss(); } catch (Exception ignored) { }
+        }
     }
 
     // Displays Fullscreen Force Update Dialog

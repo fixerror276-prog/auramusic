@@ -44,6 +44,12 @@ public class AuraBridge {
         return true;
     }
 
+    // Build number of this APK, so the update popup can skip builds that are already new enough.
+    @JavascriptInterface
+    public int getVersionCode() {
+        return BuildConfig.VERSION_CODE;
+    }
+
     // Opens APK download or external URL directly in device browser (Intent.ACTION_VIEW)
     @JavascriptInterface
     public void openBrowser(String url) {
@@ -51,17 +57,6 @@ public class AuraBridge {
         if (activity != null) {
             activity.runOnUiThread(() -> {
                 activity.openExternalBrowser(url);
-            });
-        }
-    }
-
-    // Triggers native fullscreen force-update dialog from JS if needed
-    @JavascriptInterface
-    public void showNativeUpdateDialog(String title, String message, String apkUrl) {
-        MainActivity activity = MainActivity.getInstance();
-        if (activity != null) {
-            activity.runOnUiThread(() -> {
-                activity.showUpdatePopup(title, message, apkUrl);
             });
         }
     }

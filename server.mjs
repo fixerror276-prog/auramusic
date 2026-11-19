@@ -769,6 +769,28 @@ function sameSong(a, b) {
 // Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
 const searchCache = new Map();
 
+// ── App Update Control helpers ──
+const DEFAULT_APK_URL = 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk';
+
+// Only the admin may change what every Android user is told to download. The key comes from the
+// ADMIN_KEY environment variable (set it on Vercel); without it, saving is refused.
+function adminKeyOk(req) {
+  const expected = process.env.ADMIN_KEY || '';
+  if (!expected) return 'missing';
+  const given = String(req.headers['x-admin-key'] || '');
+  const a = crypto.createHash('sha256').update(given).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b) ? 'ok' : 'wrong';
+}
+
+// The download link must be a plain https URL (it is opened in the browser with Intent.ACTION_VIEW).
+function cleanHttpsUrl(value) {
+  try {
+    const u = new URL(String(value || '').trim());
+    return u.protocol === 'https:' ? u.toString() : '';
+  } catch { return ''; }
+}
+
 // Default "Trending" search: popular songs of well-known Indian singers (a different mix each hour).
 let trendingCache = { at: 0, data: [] };
 async function trendingIndian() {
@@ -1603,47 +1625,35 @@ async function searchYouTube(query) {
         });
       }
 
-      // ── App Update API (Public for Android APK / App check) ──
-      // GET /api/app-update
-      if (pathname === '/api/app-update' && req.method === 'GET') {
+      // ── App Update Control ──
+      // Public: the Android app reads this on every launch. Web visitors never call it.
+      if ((pathname === '/api/app-update' || (pathname === '/api/admin/app-update' && req.method === 'GET')) && req.method === 'GET') {
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-        return sendJson(res, 200, {
-          success: true,
-          update: memoryDb.appUpdate || {
-            enabled: false,
-            title: 'New Update Available!',
-            message: 'Please update to get latest features & faster streaming.',
-            apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
-          }
-        });
+        return sendJson(res, 200, { success: true, update: memoryDb.appUpdate || { enabled: false, title: 'New Update Available!', message: 'Please update to get latest features & faster streaming.', apkUrl: DEFAULT_APK_URL, minVersionCode: 0 } });
       }
 
-      // ── Admin App Update Control ──
-      // GET /api/admin/app-update -> fetch current config
-      if (pathname === '/api/admin/app-update' && req.method === 'GET') {
-        res.setHeader('Cache-Control', 'no-store');
-        return sendJson(res, 200, {
-          success: true,
-          update: memoryDb.appUpdate
-        });
-      }
-
-      // POST /api/admin/app-update -> save update config
+      // Admin only: save the update popup settings.
       if (pathname === '/api/admin/app-update' && req.method === 'POST') {
+        const auth = adminKeyOk(req);
+        if (auth === 'missing') return sendJson(res, 503, { success: false, error: 'ADMIN_KEY is not set on the server. Add it in Vercel > Settings > Environment Variables, then redeploy.' });
+        if (auth !== 'ok') return sendJson(res, 401, { success: false, error: 'Wrong admin key.' });
+
         const body = await parseBody(req);
+        const enabled = body.enabled === true || body.enabled === 'true';
+        const apkUrl = cleanHttpsUrl(body.apkUrl) || (enabled && !String(body.apkUrl || '').trim() ? DEFAULT_APK_URL : '');
+        if (enabled && !apkUrl) return sendJson(res, 400, { success: false, error: 'APK Download Link must be a valid https:// link.' });
+        const minVersionCode = Math.max(0, parseInt(body.minVersionCode, 10) || 0);
         memoryDb.appUpdate = {
-          enabled: Boolean(body.enabled),
-          title: String(body.title || 'New Update Available!').trim(),
-          message: String(body.message || 'Please update to get latest features & faster streaming.').trim(),
-          apkUrl: String(body.apkUrl || '').trim() || 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
+          enabled,
+          title: String(body.title || '').trim().slice(0, 80) || 'New Update Available!',
+          message: String(body.message || '').trim().slice(0, 400) || 'Please update to get latest features & faster streaming.',
+          apkUrl: apkUrl || DEFAULT_APK_URL,
+          minVersionCode,
+          updatedAt: new Date().toISOString()
         };
         saveDatabase();
         console.log('[ADMIN] App Update config updated:', memoryDb.appUpdate);
-        return sendJson(res, 200, {
-          success: true,
-          message: 'App Update settings saved successfully',
-          update: memoryDb.appUpdate
-        });
+        return sendJson(res, 200, { success: true, message: 'App Update settings saved successfully', update: memoryDb.appUpdate });
       }
 
       return sendJson(res, 404, { error: 'Unknown API' });

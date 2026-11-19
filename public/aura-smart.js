@@ -1050,12 +1050,13 @@
             const message = up.message || 'Please update to get latest features & faster streaming.';
             const apkUrl = up.apkUrl || 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk';
 
-            // 1. Try Native Android Dialog first
-            if (window.AuraNative && typeof window.AuraNative.showNativeUpdateDialog === 'function') {
-              window.AuraNative.showNativeUpdateDialog(title, message, apkUrl);
-            }
+            // Only https links, and skip builds that are already new enough (when the admin set a minimum build).
+            const min = parseInt(up.minVersionCode, 10) || 0;
+            let mine = 0;
+            try { mine = window.AuraNative && window.AuraNative.getVersionCode ? window.AuraNative.getVersionCode() : 0; } catch (_) {}
+            if (!/^https:\/\//i.test(apkUrl) || (min > 0 && mine >= min)) return;
 
-            // 2. Also ensure Fullscreen In-App modal is active (Force Update)
+            // Fullscreen blocking page (the app also shows its own native dialog with the same text).
             showInAppFullscreenUpdateModal(title, message, apkUrl);
           }
         } catch (e) {
@@ -1141,7 +1142,7 @@
 
     async function loadAdminUpdateConfig() {
       try {
-        const res = await fetch('/api/admin/app-update');
+        const res = await fetch('/api/app-update', { cache: 'no-store' });
         if (res.ok) {
           const d = await res.json();
           if (d && d.update) adminUpdateConfig = Object.assign({}, adminUpdateConfig, d.update);
@@ -1278,6 +1279,26 @@
               </div>
             </div>
 
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                Only for app builds older than (optional)
+              </label>
+              <input type="number" min="0" id="update-input-min" value="${Number(adminUpdateConfig.minVersionCode) || 0}"
+                placeholder="0 = every build"
+                class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400/50">
+              <div class="text-[11px] text-slate-500 mt-1">0 shows the popup on every build. Put the new build number here so people who already updated are not blocked.</div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+                Admin Key (needed to save)
+              </label>
+              <input type="password" id="update-input-key" autocomplete="off"
+                value="${escapeHtml(sessionStorage.getItem('aura_admin_key') || '')}"
+                placeholder="The ADMIN_KEY set on the server"
+                class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400/50">
+            </div>
+
             <!-- Save Button & Feedback -->
             <div class="pt-2 flex items-center justify-between">
               <button type="submit" id="save-update-btn"
@@ -1323,7 +1344,10 @@
 
       form.addEventListener('submit', async function (ev) {
         ev.preventDefault();
+        const adminKey = document.getElementById('update-input-key').value.trim();
+        try { sessionStorage.setItem('aura_admin_key', adminKey); } catch (_) {}
         const payload = {
+          minVersionCode: parseInt(document.getElementById('update-input-min').value, 10) || 0,
           enabled: toggle.checked,
           title: titleInput.value.trim() || 'New Update Available!',
           message: msgInput.value.trim() || 'Please update to get latest features & faster streaming.',
@@ -1337,12 +1361,12 @@
         try {
           const res = await fetch('/api/admin/app-update', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
             body: JSON.stringify(payload)
           });
-          const result = await res.json();
+          const result = await res.json().catch(() => ({}));
           if (res.ok && result.success) {
-            adminUpdateConfig = payload;
+            adminUpdateConfig = result.update || payload;
             const badge = document.getElementById('aura-update-active-badge');
             if (badge) {
               badge.textContent = payload.enabled ? 'ON' : 'OFF';
