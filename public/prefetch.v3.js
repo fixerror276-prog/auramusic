@@ -185,8 +185,29 @@
     var y = key(b).split(' ').filter(Boolean);
     if (!x.length || !y.length) return false;
     var n = Math.min(x.length, y.length, 3);
-    for (var i = 0; i < n; i++) if (x[i] !== y[i]) return false;
-    return n >= 2 || x[0].length >= 4;
+    var starts = true;
+    for (var i = 0; i < n; i++) if (x[i] !== y[i]) { starts = false; break; }
+    if (starts && (n >= 2 || x[0].length >= 4)) return true;
+    // "Meri Aashiqui Ab Tum Hi Ho" is still "Tum Hi Ho": the shorter title sits inside the longer one.
+    var sx = x.join(' '), sy = y.join(' ');
+    var short = sx.length <= sy.length ? sx : sy, long = sx.length <= sy.length ? sy : sx;
+    return short.split(' ').length >= 3 && short.length >= 8 && (' ' + long + ' ').indexOf(' ' + short + ' ') !== -1;
+  }
+
+  // Everything after the playing song: drop other versions of songs already in the queue
+  // or already played, so "next" never gives the same song again.
+  function cleanQueue(cur, queue) {
+    var at = queue.findIndex(function(s) { return s.id === cur.id; });
+    if (at < 0) return queue;
+    var kept = [];
+    var out = [];
+    for (var i = 0; i < queue.length; i++) {
+      var s = queue[i];
+      if (i <= at) { out.push(s); kept.push(s); continue; }
+      var dup = kept.some(function(k) { return k.id === s.id || same(k.name, s.name); }) || wasPlayed(s);
+      if (!dup) { out.push(s); kept.push(s); }
+    }
+    return out;
   }
 
   var isYt = function(s) { return !!s && String(s.id || '').indexOf('yt_') === 0; };
@@ -306,14 +327,7 @@
     },
     trim: function(cur, list) {
       // Keep only the BEST version (first occurrence = highest quality from server)
-      var seenSong = {};
-      return list.filter(function(s) {
-        if (s.id === cur.id) return true;
-        var k = key(s.name);
-        if (seenSong[k]) return false;
-        seenSong[k] = true;
-        return true;
-      });
+      return cleanQueue(cur, list);
     },
     load: function(cur, done) {
       fetchRelated(cur, done, function() {});
@@ -321,7 +335,10 @@
 
     // Keep 4+ fresh songs queued after current (was 3)
     topUp: function(cur, queue, setQueue, toSong) {
-      if (!isYt(cur) || topping[cur.id]) return;
+      if (!isYt(cur)) return;
+      var cleaned = cleanQueue(cur, queue);
+      if (cleaned.length !== queue.length) { setQueue(cleaned); queue = cleaned; }
+      if (topping[cur.id]) return;
       var at = queue.findIndex(function(s) { return s.id === cur.id; });
       if (at < 0) return;
       var taste = tasteLang();
