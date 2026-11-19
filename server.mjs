@@ -791,6 +791,25 @@ function cleanHttpsUrl(value) {
   } catch { return ''; }
 }
 
+// Newest published APK build number (the release notes start with "Build <n>"; that n is the app's versionCode).
+// The popup is then only shown to older installs, so people who already updated are never blocked.
+let apkBuildCache = { at: 0, n: 0 };
+async function latestApkBuild() {
+  if (Date.now() - apkBuildCache.at < 300000) return apkBuildCache.n;
+  let n = apkBuildCache.n;
+  try {
+    const r = await fetch('https://api.github.com/repos/fixerror276-prog/auramusic/releases/tags/apk-latest', {
+      headers: { 'User-Agent': 'AuraMusic', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(4000)
+    });
+    if (r.ok) {
+      const m = /Build\s+(\d+)/i.exec((await r.json()).body || '');
+      if (m) n = parseInt(m[1], 10);
+    }
+  } catch {}
+  apkBuildCache = { at: Date.now(), n };
+  return n;
+}
+
 // Default "Trending" search: popular songs of well-known Indian singers (a different mix each hour).
 let trendingCache = { at: 0, data: [] };
 async function trendingIndian() {
@@ -1629,7 +1648,9 @@ async function searchYouTube(query) {
       // Public: the Android app reads this on every launch. Web visitors never call it.
       if ((pathname === '/api/app-update' || (pathname === '/api/admin/app-update' && req.method === 'GET')) && req.method === 'GET') {
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-        return sendJson(res, 200, { success: true, update: memoryDb.appUpdate || { enabled: false, title: 'New Update Available!', message: 'Please update to get latest features & faster streaming.', apkUrl: DEFAULT_APK_URL, minVersionCode: 0 } });
+        const upd = { ...(memoryDb.appUpdate || { enabled: false, title: 'New Update Available!', message: 'Please update to get latest features & faster streaming.', apkUrl: DEFAULT_APK_URL }) };
+        if (upd.enabled) upd.minVersionCode = await latestApkBuild(); // 0 when unknown = show to every build
+        return sendJson(res, 200, { success: true, update: upd });
       }
 
       // Admin only: save the update popup settings.
@@ -1642,7 +1663,7 @@ async function searchYouTube(query) {
         const enabled = body.enabled === true || body.enabled === 'true';
         const apkUrl = cleanHttpsUrl(body.apkUrl) || (enabled && !String(body.apkUrl || '').trim() ? DEFAULT_APK_URL : '');
         if (enabled && !apkUrl) return sendJson(res, 400, { success: false, error: 'APK Download Link must be a valid https:// link.' });
-        const minVersionCode = Math.max(0, parseInt(body.minVersionCode, 10) || 0);
+        const minVersionCode = 0; // worked out automatically from the latest release when the app asks
         memoryDb.appUpdate = {
           enabled,
           title: String(body.title || '').trim().slice(0, 80) || 'New Update Available!',

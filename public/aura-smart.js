@@ -858,27 +858,30 @@
       });
     }
 
+    let suppressUntil = 0;
+    function setReactValue(input, value) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // Tap a suggestion: put it in the search box, search it, and close the list for good.
     function selectItem(item) {
       removeSuggest();
+      clearTimeout(suggestDebounce);
+      currentQuery = '';
+      suppressUntil = Date.now() + 1200;
       if (!activeInput) return;
-
-      if (item.songObj) {
-        // Direct song play via downloadUrl
-        activeInput.value = item.name;
-        try { activeInput.dispatchEvent(new Event('input', { bubbles: true })); } catch(_) {}
-        playFastSong(item.songObj);
-        return;
-      }
-      // Fill search bar with text query and trigger search
-      activeInput.value = item.query || item.name;
+      const text = item.query || item.name;
       try {
-        activeInput.dispatchEvent(new Event('input', { bubbles: true }));
-        // Also submit the form
+        setReactValue(activeInput, text);
         const form = activeInput.closest('form');
-        if (form) {
-          setTimeout(() => form.requestSubmit ? form.requestSubmit() : form.submit(), 80);
-        }
-      } catch(_) {}
+        setTimeout(function () {
+          removeSuggest();
+          if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); }
+          try { activeInput.blur(); } catch (_) {}
+        }, 60);
+      } catch (_) {}
     }
 
     async function fetchSuggestions(query) {
@@ -889,47 +892,17 @@
 
       const items = [];
 
-      // Parallel: 1) YT suggestions (text) + 2) JioSaavn song suggestions (with thumbnails)
-      const [ytSuggest, saavnSongs] = await Promise.allSettled([
-        // YouTube search suggestions (fast, text only)
-        fetch(`/api/yt/suggestions?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(1500) })
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null),
-        // JioSaavn songs with images
-        fetch(`/api/search/songs?query=${encodeURIComponent(q)}&limit=5`, { signal: AbortSignal.timeout(2000) })
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null)
-      ]);
+      // Text completions only (what you might be typing next).
+      const ytSuggest = await fetch(`/api/yt/suggestions?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(2000) })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null);
 
       // If query changed during fetch, discard
       if (currentQuery !== q) return;
 
-      // Add Saavn song results FIRST (most useful — click to play instantly)
-      const saavnData = saavnSongs.status === 'fulfilled' ? saavnSongs.value : null;
-      const saavnResults = saavnData?.data?.results || [];
-      if (saavnResults.length > 0) {
-        saavnResults.slice(0, 5).forEach(function(song) {
-          if (!song.name) return;
-          const imgArr = song.image || [];
-          const img = imgArr[imgArr.length - 1]?.url || imgArr[0]?.url || '';
-          const artist = song.artists?.primary?.[0]?.name || '';
-          items.push({
-            type: 'song',
-            name: song.name,
-            artist: artist,
-            image: img,
-            pill: '▶ Play',
-            query: song.name,
-            songObj: song
-          });
-        });
-        items.push({ type: 'sep' });
-      }
-
       // Add YouTube text suggestions AFTER songs
-      const ytData = ytSuggest.status === 'fulfilled' ? ytSuggest.value : null;
-      const ytSuggestions = ytData?.suggestions || [];
-      ytSuggestions.slice(0, 5).forEach(function(sug) {
+      const ytSuggestions = (ytSuggest && ytSuggest.suggestions) || [];
+      ytSuggestions.slice(0, 8).forEach(function(sug) {
         if (!sug || sug.toLowerCase() === q.toLowerCase()) return;
         items.push({
           type: 'query',
@@ -959,6 +932,7 @@
 
     document.addEventListener('input', function(e) {
       if (!isSearchInput(e.target)) return;
+      if (Date.now() < suppressUntil) { removeSuggest(); return; }
       activeInput = e.target;
       const val = (e.target.value || '').trim();
       clearTimeout(suggestDebounce);
@@ -977,6 +951,22 @@
       const delay = val.length <= 3 ? 200 : 120;
       suggestDebounce = setTimeout(() => fetchSuggestions(val), delay);
     }, true);
+
+    // Searching (Enter / Search button) closes the list too.
+    document.addEventListener('submit', function () {
+      suppressUntil = Date.now() + 1200;
+      clearTimeout(suggestDebounce);
+      currentQuery = '';
+      removeSuggest();
+    }, true);
+
+    // The Search page has its own big search box; hide the second one in the top bar while it is open.
+    setInterval(function () {
+      const page = document.querySelector('input[placeholder^="Search Hindi"]');
+      const bar = document.querySelector('input[placeholder^="Search songs, artists"]');
+      const form = bar && bar.closest('form');
+      if (form) form.style.display = page ? 'none' : '';
+    }, 250);
 
     // Hide on blur
     document.addEventListener('blur', function(e) {
@@ -1269,24 +1259,14 @@
 
               <div>
                 <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
-                  APK Download Link
+                  APK Download Link <span style="color:#10B981;text-transform:none">(auto: latest APK)</span>
                 </label>
-                <input type="url" id="update-input-apk"
-                  value="${escapeHtml(adminUpdateConfig.apkUrl)}"
+                <input type="url" id="update-input-apk" readonly
+                  value="https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk"
                   placeholder="Example: https://mywebsite.com/app/latest.apk"
                   class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all font-mono text-xs"
                   ${adminUpdateConfig.enabled ? '' : 'disabled'}>
               </div>
-            </div>
-
-            <div>
-              <label class="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
-                Only for app builds older than (optional)
-              </label>
-              <input type="number" min="0" id="update-input-min" value="${Number(adminUpdateConfig.minVersionCode) || 0}"
-                placeholder="0 = every build"
-                class="w-full px-4 py-3 bg-black/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400/50">
-              <div class="text-[11px] text-slate-500 mt-1">0 shows the popup on every build. Put the new build number here so people who already updated are not blocked.</div>
             </div>
 
             <div>
@@ -1347,7 +1327,6 @@
         const adminKey = document.getElementById('update-input-key').value.trim();
         try { sessionStorage.setItem('aura_admin_key', adminKey); } catch (_) {}
         const payload = {
-          minVersionCode: parseInt(document.getElementById('update-input-min').value, 10) || 0,
           enabled: toggle.checked,
           title: titleInput.value.trim() || 'New Update Available!',
           message: msgInput.value.trim() || 'Please update to get latest features & faster streaming.',
