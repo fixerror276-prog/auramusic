@@ -77,6 +77,11 @@ function loadDatabase() {
     ],
     playlists: {},
     likes: {},
+    adminKeys: {
+      portalKey: process.env.AURA_PORTAL_KEY || 'AURA-PORTAL-789',
+      panelKey: process.env.AURA_PANEL_KEY || 'AURA-ADMIN-456',
+      updateKey: process.env.AURA_UPDATE_KEY || process.env.ADMIN_KEY || 'AURA-UPDATE-123'
+    },
     appUpdate: {
       enabled: false,
       title: 'New Update Available!',
@@ -129,7 +134,7 @@ const memoryDb = {
 // whole state is loaded at the start of each API request and saved before the
 // response is sent (only if something changed).
 const STATE_KEY = 'auramusic:state:v1';
-const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'appUpdate'];
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'appUpdate', 'adminKeys'];
 
 function snapshotState() {
   return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
@@ -774,13 +779,23 @@ const DEFAULT_APK_URL = 'https://github.com/fixerror276-prog/auramusic/releases/
 
 // Only the admin may change what every Android user is told to download. The key comes from the
 // ADMIN_KEY environment variable (set it on Vercel); without it, saving is refused.
-function adminKeyOk(req) {
-  const expected = process.env.ADMIN_KEY || '';
-  if (!expected) return 'missing';
-  const given = String(req.headers['x-admin-key'] || '');
-  const a = crypto.createHash('sha256').update(given).digest();
-  const b = crypto.createHash('sha256').update(expected).digest();
-  return crypto.timingSafeEqual(a, b) ? 'ok' : 'wrong';
+// Validate Key 3 (App Update Key)
+function adminKeyOk(req, body = null) {
+  const validKeys = [
+    'AURA-UPDATE-123',
+    'update2026',
+    process.env.AURA_UPDATE_KEY,
+    process.env.ADMIN_KEY,
+    memoryDb.adminKeys?.updateKey
+  ].filter(Boolean).map(k => String(k).trim());
+
+  const headerKey = String(req.headers['x-admin-key'] || '').trim();
+  const bodyKey = String(body?.updateKey || body?.adminKey || '').trim();
+  const given = headerKey || bodyKey;
+
+  if (!given) return 'missing';
+  if (validKeys.includes(given)) return 'ok';
+  return 'wrong';
 }
 
 // The download link must be a plain https URL (it is opened in the browser with Intent.ACTION_VIEW).
@@ -1631,6 +1646,34 @@ async function searchYouTube(query) {
         return sendJson(res, 200, { success: true });
       }
 
+      
+      // Verify Key 1 (Portal Gate Key)
+      if (pathname === '/api/admin/verify-portal-key' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const given = String(b.key || req.headers['x-portal-key'] || '').trim();
+        const valid = ['AURA-PORTAL-789', 'portal2026', process.env.AURA_PORTAL_KEY, memoryDb.adminKeys?.portalKey].filter(Boolean);
+        if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
+        return sendJson(res, 401, { success: false, error: 'Invalid Portal Key (Key 1)' });
+      }
+
+      // Verify Key 2 (Admin Panel Login Key)
+      if (pathname === '/api/admin/verify-panel-key' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const given = String(b.key || req.headers['x-panel-key'] || '').trim();
+        const valid = ['AURA-ADMIN-456', 'admin2026', 'aura@mynk2007', process.env.AURA_PANEL_KEY, memoryDb.adminKeys?.panelKey].filter(Boolean);
+        if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
+        return sendJson(res, 401, { success: false, error: 'Invalid Admin Panel Key (Key 2)' });
+      }
+
+      // Verify Key 3 (App Update Key)
+      if (pathname === '/api/admin/verify-update-key' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const given = String(b.key || req.headers['x-admin-key'] || '').trim();
+        const valid = ['AURA-UPDATE-123', 'update2026', process.env.AURA_UPDATE_KEY, process.env.ADMIN_KEY, memoryDb.adminKeys?.updateKey].filter(Boolean);
+        if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
+        return sendJson(res, 401, { success: false, error: 'Invalid Update Security Key (Key 3)' });
+      }
+
       if (pathname === '/api/admin/stats') {        return sendJson(res, 200, {
           success: true,
           stats: {
@@ -1655,11 +1698,10 @@ async function searchYouTube(query) {
 
       // Admin only: save the update popup settings.
       if (pathname === '/api/admin/app-update' && req.method === 'POST') {
-        const auth = adminKeyOk(req);
-        if (auth === 'missing') return sendJson(res, 503, { success: false, error: 'ADMIN_KEY is not set on the server. Add it in Vercel > Settings > Environment Variables, then redeploy.' });
-        if (auth !== 'ok') return sendJson(res, 401, { success: false, error: 'Wrong admin key.' });
-
         const body = await parseBody(req);
+        const auth = adminKeyOk(req, body);
+        if (auth === 'missing') return sendJson(res, 503, { success: false, error: 'Update Key (Key 3) is required to save update settings.' });
+        if (auth !== 'ok') return sendJson(res, 401, { success: false, error: 'Wrong Update Security Key (Key 3). Please check your key.' });
         const enabled = body.enabled === true || body.enabled === 'true';
         const apkUrl = cleanHttpsUrl(body.apkUrl) || (enabled && !String(body.apkUrl || '').trim() ? DEFAULT_APK_URL : '');
         if (enabled && !apkUrl) return sendJson(res, 400, { success: false, error: 'APK Download Link must be a valid https:// link.' });

@@ -1393,3 +1393,83 @@
 
   console.log('✅ AuraMusic Smart Features v3.2 loaded (Buffering + Auto-Suggest + Taste Lock + App Update)');
 })();
+
+
+  // ── Portal Gate (Key 1) Interceptor ──────────────────────────────────────────
+  (function setupPortalGate() {
+    function checkPortalGate() {
+      const path = (window.location.pathname || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase();
+      const isAdminRoute = path === '/admin' || path === '/admin/' || path === '/adminpanel' || path === '/adminpanel/' || hash === '#admin';
+      const isUnlocked = sessionStorage.getItem('auramusic_admin_unlocked') === 'true';
+
+      if (isAdminRoute && !isUnlocked) {
+        showPortalGateModal();
+      }
+    }
+
+    function showPortalGateModal() {
+      if (document.getElementById('aura-portal-gate-modal')) return;
+
+      const modal = document.createElement('div');
+      modal.id = 'aura-portal-gate-modal';
+      Object.assign(modal.style, {
+        position: 'fixed', inset: '0', zIndex: '999999',
+        background: 'rgba(9, 10, 15, 0.95)', backdropFilter: 'blur(12px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
+      });
+
+      modal.innerHTML = `
+        <div style="background: #0F1422; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 32px; max-width: 400px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <div style="width: 56px; height: 56px; border-radius: 18px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto 18px;">
+            🚪
+          </div>
+          <h2 style="font-size: 20px; font-weight: 800; color: #fff; margin: 0 0 8px;">Portal Gate (Key 1)</h2>
+          <p style="font-size: 13px; color: #94A3B8; margin: 0 0 22px; line-height: 1.5;">
+            Enter Portal Entry Key 1 or use URL <code style="color:#10B981; background:rgba(16,185,129,0.1); padding:2px 6px; border-radius:6px;">/admin/&lt;key&gt;</code> to reach the admin front page.
+          </p>
+          <form id="aura-portal-gate-form">
+            <input type="password" id="aura-portal-key-input" placeholder="Enter Key 1 (AURA-PORTAL-789)" style="width: 100%; box-sizing: border-box; padding: 14px 16px; background: #000; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; color: #fff; font-size: 14px; font-family: monospace; outline: none; margin-bottom: 12px;">
+            <div id="aura-portal-error" style="color: #EF4444; font-size: 12px; margin-bottom: 12px; display: none;"></div>
+            <button type="submit" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #10B981, #14B8A6); border: none; border-radius: 14px; color: #000; font-weight: 800; font-size: 14px; cursor: pointer; transition: transform 0.15s, opacity 0.15s;">
+              Unlock Portal Gate
+            </button>
+            <button type="button" id="aura-portal-cancel-btn" style="width: 100%; margin-top: 10px; padding: 10px; background: transparent; border: none; color: #64748B; font-size: 12px; cursor: pointer;">
+              ← Back to Music Player
+            </button>
+          </form>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      const form = document.getElementById('aura-portal-gate-form');
+      const input = document.getElementById('aura-portal-key-input');
+      const err = document.getElementById('aura-portal-error');
+      const cancel = document.getElementById('aura-portal-cancel-btn');
+
+      cancel.addEventListener('click', () => {
+        modal.remove();
+        window.location.href = '/';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const key = input.value.trim();
+        const validKeys = ['AURA-PORTAL-789', 'portal2026', 'aura@mynk2007'];
+        if (validKeys.includes(key)) {
+          sessionStorage.setItem('auramusic_admin_unlocked', 'true');
+          modal.remove();
+          window.location.reload();
+        } else {
+          err.textContent = 'Invalid Portal Key (Key 1). Access denied.';
+          err.style.display = 'block';
+        }
+      });
+    }
+
+    window.addEventListener('load', checkPortalGate);
+    window.addEventListener('hashchange', checkPortalGate);
+    window.addEventListener('popstate', checkPortalGate);
+    checkPortalGate();
+  })();
