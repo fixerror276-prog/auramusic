@@ -1401,9 +1401,9 @@
       const path = (window.location.pathname || '').toLowerCase();
       const hash = (window.location.hash || '').toLowerCase();
       const isAdminRoute = path === '/admin' || path === '/admin/' || path === '/adminpanel' || path === '/adminpanel/' || hash === '#admin';
-      const isUnlocked = sessionStorage.getItem('auramusic_admin_unlocked') === 'true';
+      const isPortalPassed = sessionStorage.getItem('auramusic_portal_unlocked') === 'true';
 
-      if (isAdminRoute && !isUnlocked) {
+      if (isAdminRoute && !isPortalPassed) {
         showPortalGateModal();
       }
     }
@@ -1426,10 +1426,10 @@
           </div>
           <h2 style="font-size: 20px; font-weight: 800; color: #fff; margin: 0 0 8px;">Portal Gate (Key 1)</h2>
           <p style="font-size: 13px; color: #94A3B8; margin: 0 0 22px; line-height: 1.5;">
-            Enter Portal Entry Key 1 or use URL <code style="color:#10B981; background:rgba(16,185,129,0.1); padding:2px 6px; border-radius:6px;">/admin/&lt;key&gt;</code> to reach the admin front page.
+            Enter Portal Entry Key 1 or use URL <code style="color:#10B981; background:rgba(16,185,129,0.1); padding:2px 6px; border-radius:6px;">/admin/auramynk@2007</code> to reach the admin front page.
           </p>
           <form id="aura-portal-gate-form">
-            <input type="password" id="aura-portal-key-input" placeholder="Enter Key 1 (AURA-PORTAL-789)" style="width: 100%; box-sizing: border-box; padding: 14px 16px; background: #000; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; color: #fff; font-size: 14px; font-family: monospace; outline: none; margin-bottom: 12px;">
+            <input type="password" id="aura-portal-key-input" placeholder="Enter Key 1 (auramynk@2007)" style="width: 100%; box-sizing: border-box; padding: 14px 16px; background: #000; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; color: #fff; font-size: 14px; font-family: monospace; outline: none; margin-bottom: 12px;">
             <div id="aura-portal-error" style="color: #EF4444; font-size: 12px; margin-bottom: 12px; display: none;"></div>
             <button type="submit" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #10B981, #14B8A6); border: none; border-radius: 14px; color: #000; font-weight: 800; font-size: 14px; cursor: pointer; transition: transform 0.15s, opacity 0.15s;">
               Unlock Portal Gate
@@ -1456,9 +1456,10 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const key = input.value.trim();
-        const validKeys = ['AURA-PORTAL-789', 'portal2026', 'aura@mynk2007'];
+        const validKeys = ['auramynk@2007', 'AURA-PORTAL-789', 'portal2026', 'aura@mynk2007'];
         if (validKeys.includes(key)) {
-          sessionStorage.setItem('auramusic_admin_unlocked', 'true');
+          // Unlock portal gate ONLY (reaches front page login), does NOT auto-login to dashboard!
+          sessionStorage.setItem('auramusic_portal_unlocked', 'true');
           modal.remove();
           window.location.reload();
         } else {
