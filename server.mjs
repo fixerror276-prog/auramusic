@@ -783,8 +783,6 @@ const DEFAULT_APK_URL = 'https://github.com/fixerror276-prog/auramusic/releases/
 function adminKeyOk(req, body = null) {
   const validKeys = [
     'mynk@2007',
-    'AURA-UPDATE-123',
-    'update2026',
     process.env.AURA_UPDATE_KEY,
     process.env.ADMIN_KEY,
     memoryDb.adminKeys?.updateKey
@@ -1652,7 +1650,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/admin/verify-portal-key' && req.method === 'POST') {
         const b = await parseBody(req);
         const given = String(b.key || req.headers['x-portal-key'] || '').trim();
-        const valid = ['auramynk@2007', 'AURA-PORTAL-789', 'portal2026', process.env.AURA_PORTAL_KEY, memoryDb.adminKeys?.portalKey].filter(Boolean);
+        const valid = ['auramynk@2007', process.env.AURA_PORTAL_KEY, memoryDb.adminKeys?.portalKey].filter(Boolean);
         if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
         return sendJson(res, 401, { success: false, error: 'Invalid Portal Key (Key 1)' });
       }
@@ -1661,7 +1659,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/admin/verify-panel-key' && req.method === 'POST') {
         const b = await parseBody(req);
         const given = String(b.key || req.headers['x-panel-key'] || '').trim();
-        const valid = ['mynk@aura2007', 'AURA-ADMIN-456', 'admin2026', 'aura@mynk2007', process.env.AURA_PANEL_KEY, memoryDb.adminKeys?.panelKey].filter(Boolean);
+        const valid = ['mynk@aura2007', process.env.AURA_PANEL_KEY, memoryDb.adminKeys?.panelKey].filter(Boolean);
         if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
         return sendJson(res, 401, { success: false, error: 'Invalid Admin Panel Key (Key 2)' });
       }
@@ -1670,7 +1668,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/admin/verify-update-key' && req.method === 'POST') {
         const b = await parseBody(req);
         const given = String(b.key || req.headers['x-admin-key'] || '').trim();
-        const valid = ['mynk@2007', 'AURA-UPDATE-123', 'update2026', process.env.AURA_UPDATE_KEY, process.env.ADMIN_KEY, memoryDb.adminKeys?.updateKey].filter(Boolean);
+        const valid = ['mynk@2007', process.env.AURA_UPDATE_KEY, process.env.ADMIN_KEY, memoryDb.adminKeys?.updateKey].filter(Boolean);
         if (valid.includes(given)) return sendJson(res, 200, { success: true, verified: true });
         return sendJson(res, 401, { success: false, error: 'Invalid Update Security Key (Key 3)' });
       }

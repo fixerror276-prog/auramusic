@@ -1456,7 +1456,7 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const key = input.value.trim();
-        const validKeys = ['auramynk@2007', 'AURA-PORTAL-789', 'portal2026', 'aura@mynk2007'];
+        const validKeys = ['auramynk@2007'];
         if (validKeys.includes(key)) {
           // Unlock portal gate ONLY (reaches front page login), does NOT auto-login to dashboard!
           sessionStorage.setItem('auramusic_portal_unlocked', 'true');
