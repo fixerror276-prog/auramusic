@@ -1734,29 +1734,48 @@
         return;
       }
 
-      const audio = document.querySelector('audio');
-      if (!audio) {
-        alert('Audio player element ready');
-        return;
-      }
-
-      const blobUrl = URL.createObjectURL(blob);
-      audio.src = blobUrl;
-      audio.load();
-      try {
-        await audio.play();
-      } catch(e) {
-        console.warn('Audio play error:', e);
-      }
-
       // Close modal if open
       const modal = document.getElementById('aura-offline-modal');
       if (modal) modal.remove();
 
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Try to get song metadata from IndexedDB list
+      let songMeta = null;
+      try {
+        const list = await getAllOfflineSongs();
+        songMeta = list.find(s => String(s.id) === String(songId));
+      } catch(_) {}
+
+      // If main app player function is available, use it for full UI update
+      if (typeof window.__auraPlaySong === 'function' && songMeta) {
+        const offlineSong = {
+          ...songMeta,
+          url: blobUrl,
+          streamUrl: blobUrl,
+          _offlineBlob: true
+        };
+        try {
+          await window.__auraPlaySong(offlineSong);
+        } catch(e) {
+          console.warn('__auraPlaySong error:', e);
+          // Fallback to direct audio element
+          const audio = document.querySelector('audio');
+          if (audio) { audio.src = blobUrl; audio.load(); await audio.play().catch(()=>{}); }
+        }
+      } else {
+        // Fallback: direct audio element play
+        const audio = document.querySelector('audio');
+        if (!audio) { alert('Audio player not ready'); return; }
+        audio.src = blobUrl;
+        audio.load();
+        try { await audio.play(); } catch(e) { console.warn('Audio play error:', e); }
+      }
+
       // Show toast
       const toast = document.createElement('div');
-      toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#10b981;color:#000;font-weight:900;font-size:12px;padding:10px 20px;border-radius:9999px;z-index:999999;box-shadow:0 10px 25px rgba(16,185,129,0.5);display:flex;items-center;gap:8px;';
-      toast.innerHTML = `<span>▶️</span><span>Playing Offline Track from Device Storage!</span>`;
+      toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#10b981;color:#000;font-weight:900;font-size:12px;padding:10px 20px;border-radius:9999px;z-index:999999;box-shadow:0 10px 25px rgba(16,185,129,0.5);display:flex;align-items:center;gap:8px;';
+      toast.innerHTML = `<span>▶️</span><span>Playing Offline: ${songMeta ? songMeta.name : 'Track'}</span>`;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 3500);
     };
