@@ -296,28 +296,45 @@
         if (data.success && data.user) {
           // Persist user in local storage to match app login state
           try {
-            const STORAGE_KEY = 'auramusic_user_session';
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data.user));
+            const STORAGE_KEY = 'auramusic_current_user';
+            const userObj = {
+              id: data.user.id || data.user._id || `user_${Date.now()}`,
+              name: data.user.name || data.user.email.split('@')[0],
+              email: data.user.email,
+              avatar: data.user.avatar || '/avatars/p1.jpg',
+              provider: 'otp'
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(userObj));
+            localStorage.setItem('auramusic_user_session', JSON.stringify(userObj));
+            if (data.token) localStorage.setItem('auramusic_session_token', data.token);
+
             // Also update any app profile accounts
             const ACC_KEY = 'auramusic_saved_accounts';
             let accs = [];
             try { accs = JSON.parse(localStorage.getItem(ACC_KEY) || '[]'); } catch {}
+            accs = accs.filter(a => a.email !== userObj.email);
             accs.unshift({
               provider: 'otp',
-              providerId: data.user.id,
-              name: data.user.name,
-              email: data.user.email,
-              avatar: data.user.avatar,
+              providerId: userObj.id,
+              name: userObj.name,
+              email: userObj.email,
+              avatar: userObj.avatar,
               timestamp: Date.now()
             });
             localStorage.setItem(ACC_KEY, JSON.stringify(accs));
+
+            // Instant UI update
+            if (window.__auraUpdateUser) window.__auraUpdateUser();
+            window.dispatchEvent(new CustomEvent('auramusic:auth', { detail: userObj }));
           } catch (e) {
             console.error('Storage error:', e);
           }
 
           // Trigger success celebration and reload/update state
           closeExistingModal();
-          window.location.reload();
+          setTimeout(() => {
+            window.location.reload();
+          }, 150);
         } else {
           errBox.textContent = data.error || 'Invalid or expired OTP code.';
           errBox.style.display = 'block';

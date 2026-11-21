@@ -1563,7 +1563,8 @@
 
       const modal = document.createElement('div');
       modal.id = 'aura-feature-modal';
-      modal.className = 'fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; height:100% !important; z-index:2147483647 !important; background:rgba(0,0,0,0.85) !important; backdrop-filter:blur(10px) !important; display:flex !important; align-items:center !important; justify-content:center !important; padding:16px !important; margin:0 !important;';
       modal.innerHTML = `
         <div class="w-full max-w-xs sm:max-w-sm bg-[#0e1320] border border-emerald-500/40 rounded-3xl p-5 sm:p-6 shadow-[0_0_50px_rgba(16,185,129,0.25)] relative text-white flex flex-col items-center text-center">
           <button id="aura-feature-close-btn" class="absolute top-4 right-4 p-2 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-slate-400 hover:text-white transition-all cursor-pointer">
@@ -1876,7 +1877,8 @@
 
       const modal = document.createElement('div');
       modal.id = 'aura-offline-modal';
-      modal.className = 'fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; height:100% !important; z-index:2147483647 !important; background:rgba(0,0,0,0.85) !important; backdrop-filter:blur(10px) !important; display:flex !important; align-items:center !important; justify-content:center !important; padding:16px !important; margin:0 !important;';
       modal.innerHTML = `
         <div class="w-full max-w-sm sm:max-w-md bg-[#0e1320] border border-emerald-500/30 rounded-3xl p-5 sm:p-6 shadow-[0_0_50px_rgba(16,185,129,0.25)] relative text-white max-h-[85vh] flex flex-col">
           <div class="flex items-center justify-between pb-3.5 border-b border-white/[0.08]">
@@ -1937,7 +1939,8 @@
       return new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.id = 'aura-storage-permission-modal';
-        modal.className = 'fixed inset-0 z-[9999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+        modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+        modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; height:100% !important; z-index:2147483647 !important; background:rgba(0,0,0,0.85) !important; backdrop-filter:blur(10px) !important; display:flex !important; align-items:center !important; justify-content:center !important; padding:16px !important; margin:0 !important;';
         modal.innerHTML = `
           <div class="w-full max-w-xs bg-[#0e1320] border border-emerald-500/40 rounded-3xl p-5 shadow-[0_0_50px_rgba(16,185,129,0.3)] relative text-white flex flex-col items-center text-center">
             <div class="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-2xl mb-3 shadow-lg shadow-emerald-500/20 text-emerald-400">
@@ -2070,7 +2073,7 @@
     // (Explicitly removed from bottom mini player bar as requested!)
     // ────────────────────────────────────────────────────────────────────────
     function injectDownloadButtons() {
-      // Fullscreen Now Playing Controls (inside track play screen)
+      // 1. Fullscreen Now Playing Controls (inside track play screen)
       const fullscreenControls = document.querySelector('div[class*="z-50 bg-[#07080c]"] footer div[class*="space-x-4"]');
       if (fullscreenControls && !document.getElementById('aura-fullscreen-download-btn')) {
         const dlBtn = document.createElement('button');
@@ -2083,6 +2086,21 @@
           window.auraDownloadCurrentSong();
         };
         fullscreenControls.appendChild(dlBtn);
+      }
+
+      // 2. Bottom Mini-Player Bar (direct download from wherever user is)
+      const miniActions = document.querySelector('button[title*="Liked"]');
+      if (miniActions && miniActions.parentElement && !document.getElementById('aura-mini-download-btn')) {
+        const miniDlBtn = document.createElement('button');
+        miniDlBtn.id = 'aura-mini-download-btn';
+        miniDlBtn.title = 'Download Song to Phone';
+        miniDlBtn.className = 'p-1 sm:p-1.5 text-slate-400 hover:text-emerald-400 rounded-full hover:bg-white/[0.06] transition-all cursor-pointer flex items-center justify-center';
+        miniDlBtn.innerHTML = `<svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>`;
+        miniDlBtn.onclick = function(e) {
+          e.stopPropagation();
+          window.auraDownloadCurrentSong();
+        };
+        miniActions.parentElement.appendChild(miniDlBtn);
       }
     }
 

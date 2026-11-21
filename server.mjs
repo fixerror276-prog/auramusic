@@ -8,7 +8,7 @@ const ytAudioClient = new Ytdl({
   clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded]
 });
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
-import { redisEnabled, kvGetJson, kvSetRaw } from './store.mjs';
+import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
@@ -148,6 +148,29 @@ async function loadState() {
       if (saved[f] !== undefined) memoryDb[f] = saved[f];
     }
   }
+
+  // If Neon Postgres is configured, also merge any users registered directly in SQL
+  if (storeKind === 'neon') {
+    try {
+      const { neonQuery } = await import('./store.mjs');
+      const dbUsers = await neonQuery('SELECT id, name, email FROM users');
+      if (Array.isArray(dbUsers)) {
+        for (const du of dbUsers) {
+          if (du && du.email && !memoryDb.users.some(u => u.email === du.email)) {
+            memoryDb.users.push({
+              id: du.id || `user_${Date.now()}`,
+              name: du.name || du.email.split('@')[0],
+              email: du.email,
+              avatar: '/avatars/p1.jpg',
+              authProvider: 'neon_postgres',
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   const now = Date.now();
   for (const [token, s] of Object.entries(memoryDb.activeSessions)) {
     if (!s || s.expiresAt <= now) delete memoryDb.activeSessions[token];
@@ -164,7 +187,12 @@ async function loadState() {
 
 async function saveState(before) {
   const after = JSON.stringify(snapshotState());
-  if (!before || after !== before) await kvSetRaw(STATE_KEY, after);
+  if (!before || after !== before) {
+    await kvSetRaw(STATE_KEY, after);
+    if (storeKind === 'neon') {
+      syncAllUsersToNeon(memoryDb.users).catch(() => {});
+    }
+  }
 }
 
 const MIME_TYPES = {
@@ -437,6 +465,7 @@ const server = http.createServer(async (req, res) => {
 
         memoryDb.users.push(newUser);
         saveDatabase();
+        syncUserToNeon(newUser).catch(() => {});
         if (redisEnabled) {
           try { await saveState(); console.log('✅ [NEON DB] Saved new user:', newUser.email); }
           catch (err) { console.error('❌ [NEON DB ERROR on user register]:', err.message); }
@@ -572,6 +601,7 @@ const server = http.createServer(async (req, res) => {
           };
           memoryDb.users.push(user);
           saveDatabase();
+          syncUserToNeon(user).catch(() => {});
           if (redisEnabled) {
             try { await saveState(); console.log('✅ [NEON DB] Saved Google user:', user.email); }
             catch (err) { console.error('❌ [NEON DB ERROR on Google login]:', err.message); }

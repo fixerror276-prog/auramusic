@@ -16,26 +16,114 @@ export const storeKind = useNeon ? 'neon' : (BASE && TOKEN ? 'redis' : 'none');
 
 // ── Neon: SQL over HTTPS (works on serverless, no driver needed) ──
 let neonReady = null;
-async function neonQuery(query, params = []) {
-  const host = new URL(NEON_URL.replace(/^postgres(ql)?:/i, 'https:')).host;
-  const endpoint = process.env.NEON_SQL_URL || `https://${host}/sql`;
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Neon-Connection-String': NEON_URL, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, params }),
-    signal: AbortSignal.timeout(10000)
-  });
+
+function getNeonEndpoint() {
+  if (process.env.NEON_SQL_URL) return process.env.NEON_SQL_URL;
+  try {
+    const rawHost = new URL(NEON_URL.replace(/^postgres(ql)?:/i, 'https:')).host;
+    // Neon HTTP /sql API is hosted on the primary host without '-pooler'
+    const directHost = rawHost.replace('-pooler', '');
+    return `https://${directHost}/sql`;
+  } catch (_) {
+    return '';
+  }
+}
+
+export async function neonQuery(query, params = []) {
+  if (!useNeon) return [];
+  const endpoint = getNeonEndpoint();
+  if (!endpoint) return [];
+
+  let res = null;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Neon-Connection-String': NEON_URL, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, params }),
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch (err) {
+    // If direct host failed, try with rawHost
+    try {
+      const rawHost = new URL(NEON_URL.replace(/^postgres(ql)?:/i, 'https:')).host;
+      res = await fetch(`https://${rawHost}/sql`, {
+        method: 'POST',
+        headers: { 'Neon-Connection-String': NEON_URL, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, params }),
+        signal: AbortSignal.timeout(10000)
+      });
+    } catch (_) {
+      throw err;
+    }
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || `Neon HTTP ${res.status}`);
   return data.rows || [];
 }
-function neonInit() {
+
+async function neonInit() {
   if (!neonReady) {
-    neonReady = neonQuery(
-      'CREATE TABLE IF NOT EXISTS aura_kv (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())'
-    ).catch(e => { neonReady = null; throw e; });
+    neonReady = (async () => {
+      // Ensure aura_kv table exists
+      await neonQuery(
+        'CREATE TABLE IF NOT EXISTS aura_kv (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())'
+      );
+      // Ensure users table exists in Neon Postgres
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS users (
+          id varchar(255) PRIMARY KEY,
+          name varchar(255),
+          email varchar(255),
+          password_hash text,
+          avatar text,
+          auth_provider text,
+          created_at timestamptz DEFAULT now()
+        )`
+      ).catch(() => {});
+    })().catch(e => { neonReady = null; throw e; });
   }
   return neonReady;
+}
+
+// ── Sync user directly into Neon Postgres 'users' table ──
+export async function syncUserToNeon(user) {
+  if (!useNeon || !user || !user.email) return;
+  try {
+    await neonInit();
+    const id = String(user.id || user._id || `user_${Date.now()}`);
+    const name = String(user.name || user.email.split('@')[0]);
+    const email = String(user.email).toLowerCase().trim();
+
+    await neonQuery(
+      `INSERT INTO users (id, name, email) 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email`,
+      [id, name, email]
+    );
+  } catch (err) {
+    // Fallback: If conflict on id without constraint, try insert or update by email
+    try {
+      const id = String(user.id || user._id || `user_${Date.now()}`);
+      const name = String(user.name || user.email.split('@')[0]);
+      const email = String(user.email).toLowerCase().trim();
+      const existing = await neonQuery('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+      if (existing && existing.length > 0) {
+        await neonQuery('UPDATE users SET name = $1 WHERE email = $2', [name, email]);
+      } else {
+        await neonQuery('INSERT INTO users (id, name, email) VALUES ($1, $2, $3)', [id, name, email]);
+      }
+    } catch (e2) {
+      console.warn('[NEON] user table sync notice:', e2.message);
+    }
+  }
+}
+
+export async function syncAllUsersToNeon(users) {
+  if (!useNeon || !Array.isArray(users)) return;
+  for (const u of users) {
+    if (u && u.email) await syncUserToNeon(u);
+  }
 }
 
 async function command(args) {

@@ -1533,12 +1533,18 @@
         timestamp: Date.now()
       });
       localStorage.setItem(ACC_KEY, JSON.stringify(accs));
+
+      // Instant in-app UI update for single-tap sign in
+      if (window.__auraUpdateUser) window.__auraUpdateUser();
+      window.dispatchEvent(new CustomEvent('auramusic:auth', { detail: currentUser }));
     } catch (e) {
       console.warn('Storage sync warn:', e);
     }
 
     closeModal();
-    window.location.reload();
+    setTimeout(() => {
+      window.location.reload();
+    }, 150);
   }
 
   function closeModal() {
