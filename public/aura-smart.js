@@ -1,4 +1,3 @@
-
 // ═══════════════════════════════════════════════════════════════════════════
 // AuraMusic Smart Features v3.0
 // • Add to Playlist button on every song card
@@ -1478,29 +1477,34 @@
 
 
   // ══════════════════════════════════════════════════════════════════════════
-  // 8. NEON GLOWING VIBE RADAR ICONS & OFFLINE MUSIC DOWNLOAD ENGINE
+
+
   // ══════════════════════════════════════════════════════════════════════════
-  (function setupVibeIconsAndOfflineDownload() {
+  // 8. NEON GLOWING VIBE RADAR ICONS, FEATURE MODAL & OFFLINE MUSIC DOWNLOAD
+  // ══════════════════════════════════════════════════════════════════════════
+  (function setupVibeFeatureAndOfflineMusic() {
+    // ────────────────────────────────────────────────────────────────────────
     // A. SVG Neon Glowing Icons Definitions matching Screenshot 1
+    // ────────────────────────────────────────────────────────────────────────
     const VIBE_ICONS = {
-      'romantic': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(244,63,94,0.9)] text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      'romantic': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(244,63,94,0.9)] text-rose-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
-        <path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08c.82.82 2.13.85 3 .07l.96-.96" stroke-width="1.8" stroke="currentColor" opacity="0.8"/>
+        <path d="M12 5 9.04 7.96a2.17 2.17 0 0 0 0 3.08c.82.82 2.13.85 3 .07l.96-.96" stroke-width="1.8" stroke="currentColor" opacity="0.85"/>
       </svg>`,
-      'midnight': `<svg class="w-9 h-8 filter drop-shadow-[0_0_8px_rgba(6,182,212,0.9)] text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      'midnight': `<svg class="w-9 h-8 filter drop-shadow-[0_0_8px_rgba(6,182,212,0.9)] text-cyan-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.5 2.8C2.1 10.7 2 10.9 2 11.2V16c0 .6.4 1 1 1h2"/>
         <circle cx="7" cy="17" r="2"/>
         <path d="M9 17h6"/>
         <circle cx="17" cy="17" r="2"/>
         <path d="m5 11 1.5-3"/>
       </svg>`,
-      'rain': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.9)] text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      'rain': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.9)] text-sky-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
         <path d="m9 17-1.5 3"/>
         <path d="m13 16-1.5 3"/>
         <path d="m17 17-1.5 3"/>
       </svg>`,
-      'gym': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(16,185,129,0.9)] text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      'gym': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(16,185,129,0.9)] text-emerald-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="m6.5 6.5 11 11"/>
         <path d="m21 21-1-1"/>
         <path d="m3 3 1 1"/>
@@ -1509,7 +1513,7 @@
         <path d="m3 10 7-7"/>
         <path d="m14 21 7-7"/>
       </svg>`,
-      'party': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(245,158,11,0.9)] text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      'party': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(245,158,11,0.9)] text-amber-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5.8 11.3 2 22l10.7-3.79"/>
         <path d="M4 3h.01"/>
         <path d="M22 8h.01"/>
@@ -1518,13 +1522,12 @@
         <path d="m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12v0c.1.86-.57 1.63-1.45 1.63h-.38e-2"/>
         <path d="m11 13 3 3"/>
       </svg>`,
-      'item': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(249,115,22,0.9)] text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      'item': `<svg class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(249,115,22,0.9)] text-orange-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
       </svg>`
     };
 
     function enhanceVibeRadarCards() {
-      // Find all buttons inside Aesthetic Vibe Radar section
       const buttons = document.querySelectorAll('button');
       buttons.forEach(btn => {
         const text = btn.innerText || '';
@@ -1547,17 +1550,198 @@
       });
     }
 
-    // B. OFFLINE MUSIC DOWNLOAD SYSTEM
+    // ────────────────────────────────────────────────────────────────────────
+    // B. WEB DOWNLOAD APP FEATURE POPUP / COMPACT MODAL
+    // ────────────────────────────────────────────────────────────────────────
+    const isApp = !!(window.AuraNative || window.__isAndroidApp || window.isAuraApp);
+
+    function showAppFeatureModal() {
+      if (document.getElementById('aura-feature-modal')) return;
+
+      const modal = document.createElement('div');
+      modal.id = 'aura-feature-modal';
+      modal.className = 'fixed inset-0 z-[999999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.innerHTML = `
+        <div class="w-full max-w-sm bg-[#0e1320] border border-emerald-500/40 rounded-3xl p-6 shadow-[0_0_50px_rgba(16,185,129,0.25)] relative text-white">
+          <button id="aura-feature-close-btn" class="absolute top-4 right-4 p-2 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-slate-400 hover:text-white transition-all cursor-pointer">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+          <div class="flex items-center space-x-3 mb-4">
+            <img src="/icon-192.png" alt="AuraMusic" class="w-12 h-12 rounded-2xl shadow-lg ring-2 ring-emerald-500/50 object-cover" />
+            <div>
+              <h3 class="text-lg font-black text-white leading-tight">AuraMusic App</h3>
+              <p class="text-[11px] text-emerald-400 font-bold">100% Free & Unlimited Music</p>
+            </div>
+          </div>
+          <div class="space-y-2.5 mb-5 text-xs text-slate-300 bg-white/[0.03] p-3.5 rounded-2xl border border-white/[0.06]">
+            <div class="flex items-center space-x-2">
+              <span class="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-black shrink-0">✓</span>
+              <span>100% Ad-Free Background & Lock Screen Play</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-black shrink-0">✓</span>
+              <span>Offline Music Download & 320kbps Lossless Sound</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-black shrink-0">✓</span>
+              <span>Instant Track Search with Zero Buffering</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-black shrink-0">✓</span>
+              <span>Lock Screen Notification & Media Controls</span>
+            </div>
+          </div>
+          <a href="https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk" download="AuraMusic.apk" id="aura-modal-download-btn" class="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 text-black font-black text-sm hover:opacity-95 transition-all shadow-lg shadow-emerald-500/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95">
+            <svg class="w-4 h-4 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15V3m9 12v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-9 5 5 5-5"/></svg>
+            <span>Install App Now</span>
+          </a>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+      modal.querySelector('#aura-feature-close-btn').addEventListener('click', () => modal.remove());
+      modal.querySelector('#aura-modal-download-btn').addEventListener('click', () => {
+        setTimeout(() => modal.remove(), 1200);
+      });
+    }
+
+    // Hook header button to open feature modal on web, or convert to Offline Songs if in App
+    function configureHeaderDownloadBtn() {
+      const headerBtn = document.getElementById('aura-header-download-apk');
+      if (!headerBtn) return;
+
+      if (isApp) {
+        // Inside App: Convert header button into "Offline Songs"
+        if (headerBtn.dataset.auraMode !== 'offline') {
+          headerBtn.dataset.auraMode = 'offline';
+          headerBtn.removeAttribute('href');
+          headerBtn.removeAttribute('download');
+          headerBtn.removeAttribute('target');
+          headerBtn.title = 'View Offline Downloaded Songs';
+          headerBtn.className = 'flex items-center space-x-1.5 py-1.5 px-3 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-black transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm shadow-emerald-500/10 shrink-0';
+          headerBtn.innerHTML = `
+            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+            <span>Downloaded</span>
+          `;
+          headerBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            showDownloadedSongsModal();
+          };
+        }
+      } else {
+        // On Web Browser: Intercept direct click and show the compact Features + Install modal!
+        if (headerBtn.dataset.auraMode !== 'featureModal') {
+          headerBtn.dataset.auraMode = 'featureModal';
+          headerBtn.removeAttribute('href');
+          headerBtn.removeAttribute('download');
+          headerBtn.removeAttribute('target');
+          headerBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            showAppFeatureModal();
+          };
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // C. OFFLINE DOWNLOADED SONGS MODAL & STORAGE
+    // ────────────────────────────────────────────────────────────────────────
+    function getDownloadedSongs() {
+      try {
+        const raw = localStorage.getItem('auramusic_downloaded_songs');
+        return raw ? JSON.parse(raw) : [];
+      } catch (_) { return []; }
+    }
+
+    function saveDownloadedSong(song) {
+      try {
+        let list = getDownloadedSongs();
+        list = list.filter(s => s.id !== song.id && s.name !== song.name);
+        list.unshift({
+          id: song.id,
+          videoId: song.videoId || '',
+          name: song.name,
+          artist: song.artist || 'AuraMusic Artist',
+          image: song.image || '/logo.png',
+          downloadedAt: Date.now()
+        });
+        localStorage.setItem('auramusic_downloaded_songs', JSON.stringify(list.slice(0, 100)));
+      } catch(_) {}
+    }
+
+    function showDownloadedSongsModal() {
+      if (document.getElementById('aura-offline-modal')) return;
+      const list = getDownloadedSongs();
+
+      const modal = document.createElement('div');
+      modal.id = 'aura-offline-modal';
+      modal.className = 'fixed inset-0 z-[999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.innerHTML = `
+        <div class="w-full max-w-md bg-[#0e1320] border border-emerald-500/30 rounded-3xl p-6 shadow-[0_0_50px_rgba(16,185,129,0.25)] relative text-white max-h-[85vh] flex flex-col">
+          <div class="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+            <div class="flex items-center space-x-2.5">
+              <span class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 15V3m9 12v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-9 5 5 5-5"/></svg>
+              </span>
+              <div>
+                <h3 class="text-base font-black text-white">Downloaded Songs</h3>
+                <p class="text-[11px] text-slate-400 font-semibold">${list.length} songs available for Offline Play</p>
+              </div>
+            </div>
+            <button id="aura-offline-close-btn" class="p-2 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-slate-400 hover:text-white transition-all cursor-pointer">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto py-3 space-y-2 mt-2">
+            ${list.length === 0 ? `
+              <div class="text-center py-10 space-y-2 text-slate-400">
+                <p class="text-3xl">🎵</p>
+                <p class="text-sm font-bold text-white">No downloaded songs yet</p>
+                <p class="text-xs text-slate-400">Tap the 📥 Download button on any song to save it for offline listening.</p>
+              </div>
+            ` : list.map((s, idx) => `
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] transition-all">
+                <div class="flex items-center space-x-3 min-w-0">
+                  <img src="${s.image}" class="w-10 h-10 rounded-lg object-cover bg-slate-800 shrink-0" onerror="this.src='/logo.png'" />
+                  <div class="min-w-0">
+                    <p class="text-xs font-bold text-white truncate">${s.name}</p>
+                    <p class="text-[10px] text-slate-400 truncate">${s.artist}</p>
+                  </div>
+                </div>
+                <button onclick="window.auraDownloadCurrentSong(${JSON.stringify(s).replace(/"/g, '&quot;')})" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black hover:bg-emerald-500/30 transition-all cursor-pointer shrink-0">
+                  Play / Save
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+      modal.querySelector('#aura-offline-close-btn').addEventListener('click', () => modal.remove());
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // D. UNIVERSAL OFFLINE MUSIC DOWNLOAD ENGINE
+    // ────────────────────────────────────────────────────────────────────────
     window.auraDownloadCurrentSong = async function(song) {
       if (!song) {
-        // Grab currently active song from localStorage or audio player
         try {
-          const s = localStorage.getItem('auramusic_last_played_song');
+          const s = localStorage.getItem('auramusic_current_song');
           if (s) song = JSON.parse(s);
         } catch(_) {}
       }
       if (!song || !song.name) {
-        alert('Please play a song first to download.');
+        alert('Please play or select a song to download.');
         return;
       }
 
@@ -1565,7 +1749,10 @@
       const songArtist = (song.artist || 'AuraMusic').replace(/[\\/:*?"<>|]/g, '');
       const filename = `${songTitle} - ${songArtist}.mp3`;
 
-      // Show toast
+      // Save to offline list
+      saveDownloadedSong(song);
+
+      // Toast notification
       const toast = document.createElement('div');
       toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#10b981;color:#000;font-weight:900;font-size:12px;padding:10px 18px;border-radius:9999px;z-index:999999;box-shadow:0 10px 25px rgba(16,185,129,0.5);display:flex;items-center;gap:8px;';
       toast.innerHTML = `<span>⏳</span><span>Downloading "${songTitle}" for Offline Play...</span>`;
@@ -1573,7 +1760,6 @@
 
       try {
         let streamUrl = song.streamUrl || song.url;
-        // If streamUrl is an internal /api/yt/stream URL or null, fetch stream json
         if (!streamUrl || streamUrl.startsWith('/api/')) {
           const cleanId = (song.videoId || song.id || '').replace(/^yt_|^yt-/, '').trim();
           const res = await fetch(`/api/yt/stream?id=${encodeURIComponent(cleanId)}&title=${encodeURIComponent(song.name)}&artist=${encodeURIComponent(song.artist)}&json=1`);
@@ -1585,7 +1771,6 @@
 
         if (!streamUrl) throw new Error('Audio stream unavailable');
 
-        // Fetch audio blob for direct client-side save
         const resp = await fetch(streamUrl);
         if (!resp.ok) throw new Error('Stream fetch failed');
         const blob = await resp.blob();
@@ -1603,11 +1788,10 @@
         }, 2000);
 
         toast.style.background = '#059669';
-        toast.innerHTML = `<span>✅</span><span>Downloaded! Saved to your device.</span>`;
+        toast.innerHTML = `<span>✅</span><span>Downloaded! Saved for offline listening.</span>`;
         setTimeout(() => toast.remove(), 3500);
       } catch (err) {
-        console.warn('Direct blob download failed, falling back to direct stream save:', err);
-        // Fallback: direct window open or anchor trigger
+        console.warn('Direct blob download fallback:', err);
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = `/api/yt/stream?id=${encodeURIComponent((song.videoId || song.id || '').replace(/^yt_|^yt-/, ''))}&title=${encodeURIComponent(song.name)}&artist=${encodeURIComponent(song.artist)}`;
@@ -1623,10 +1807,12 @@
       }
     };
 
-    // Inject Download button into player bar & now-playing modal if not already present
+    // ────────────────────────────────────────────────────────────────────────
+    // E. INJECT DOWNLOAD BUTTONS INTO ALL SONGS, PLAYER BAR & FULLSCREEN
+    // ────────────────────────────────────────────────────────────────────────
     function injectDownloadButtons() {
-      // 1. Bottom Player Bar (next to like/playlist button)
-      const likeBtn = document.querySelector('footer button title="Add to Favorites", footer button[title*="Like"], div[class*="fixed bottom"] button[title*="Like"], button[title*="Playlist"]');
+      // 1. Bottom Player Bar
+      const likeBtn = document.querySelector('footer button[title*="Favorites"], footer button[title*="Like"], div[class*="fixed bottom"] button[title*="Like"]');
       if (likeBtn && !document.getElementById('aura-bar-download-btn')) {
         const dlBtn = document.createElement('button');
         dlBtn.id = 'aura-bar-download-btn';
@@ -1640,8 +1826,7 @@
         likeBtn.parentNode.insertBefore(dlBtn, likeBtn.nextSibling);
       }
 
-      // 2. Fullscreen Player Controls (next to like / repeat)
-      const fullscreenLike = document.querySelector('div[class*="z-50 bg-[#07080c]"] button');
+      // 2. Fullscreen Player Controls
       const fullscreenControls = document.querySelector('div[class*="z-50 bg-[#07080c]"] footer div[class*="space-x-4"]');
       if (fullscreenControls && !document.getElementById('aura-fullscreen-download-btn')) {
         const dlBtn = document.createElement('button');
@@ -1655,17 +1840,50 @@
         };
         fullscreenControls.appendChild(dlBtn);
       }
+
+      // 3. All Song Row Cards (Add to playlist buttons -> append Download icon)
+      const playlistBtns = document.querySelectorAll('button[title="Add to Playlist"]');
+      playlistBtns.forEach(btn => {
+        if (btn.nextSibling && btn.nextSibling.id === 'aura-row-download-btn') return;
+        const row = btn.closest('div.group, div[class*="items-center"]');
+        if (!row) return;
+
+        const rowDl = document.createElement('button');
+        rowDl.id = 'aura-row-download-btn';
+        rowDl.title = 'Download Song';
+        rowDl.className = 'p-1 text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer flex items-center justify-center shrink-0';
+        rowDl.innerHTML = `<svg class="w-3.5 h-3.5 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 15V3m9 12v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-9 5 5 5-5"/></svg>`;
+        rowDl.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          // Extract song title & artist from row
+          const titleEl = row.querySelector('h3, h4, p[class*="font-bold"], span[class*="font-bold"], div[class*="font-bold"]');
+          const artistEl = row.querySelector('p[class*="text-slate-400"], p[class*="text-xs"], span[class*="text-slate-400"]');
+          const name = titleEl ? titleEl.innerText.trim() : 'Song';
+          const artist = artistEl ? artistEl.innerText.trim() : 'AuraMusic';
+          const imgEl = row.querySelector('img');
+          const image = imgEl ? imgEl.src : '/logo.png';
+
+          window.auraDownloadCurrentSong({ name, artist, image });
+        };
+        btn.parentNode.insertBefore(rowDl, btn.nextSibling);
+      });
     }
 
-    // Observer to continuously ensure Vibe cards have glowing SVG icons and Download buttons
-    const vibeObserver = new MutationObserver(() => {
+    // ────────────────────────────────────────────────────────────────────────
+    // Continuous DOM Observer
+    // ────────────────────────────────────────────────────────────────────────
+    const mainObserver = new MutationObserver(() => {
       enhanceVibeRadarCards();
+      configureHeaderDownloadBtn();
       injectDownloadButtons();
     });
-    vibeObserver.observe(document.documentElement, { childList: true, subtree: true });
+    mainObserver.observe(document.documentElement, { childList: true, subtree: true });
 
     window.addEventListener('DOMContentLoaded', () => {
       enhanceVibeRadarCards();
+      configureHeaderDownloadBtn();
       injectDownloadButtons();
     });
   })();
