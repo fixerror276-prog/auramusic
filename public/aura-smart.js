@@ -1713,26 +1713,75 @@
       try {
         const db = await getAudioDB();
         return new Promise((resolve) => {
-          const tx = db.transaction(DB_STORE, 'readonly');
+          const tx = db.transaction(DB_STORE, 'readwrite');
           const store = tx.objectStore(DB_STORE);
           const req = store.getAll();
           req.onsuccess = () => {
-            const list = req.result || [];
-            list.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-            resolve(list);
+            const rawList = req.result || [];
+            const validList = [];
+            for (const s of rawList) {
+              if (s && s.blob && s.blob.size > 1000) {
+                validList.push(s);
+              } else if (s && s.id) {
+                // Purge dead song records so re-downloading or reinstalling app cleans up broken entries
+                try { store.delete(s.id); } catch (_) {}
+              }
+            }
+            validList.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+            resolve(validList);
           };
           req.onerror = () => resolve([]);
         });
       } catch (_) { return []; }
     }
 
-    // Play offline song directly inside the app's <audio> element
+    // Function to delete an offline song
+    window.auraDeleteOfflineSong = async function(songId) {
+      try {
+        const db = await getAudioDB();
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).delete(songId);
+        tx.oncomplete = () => {
+          const modal = document.getElementById('aura-offline-modal');
+          if (modal) { modal.remove(); showDownloadedSongsModal(); }
+          toast('🗑️ Song removed from offline list');
+        };
+      } catch(_) {}
+    };
+
+    // Offline song skip support: automatically skips to next/prev downloaded song
+    window.__auraCurrentOfflineSongId = null;
+    window.__auraIsPlayingOffline = false;
+
+    window.__auraSkipOffline = function(direction = 'next') {
+      if (!window.__auraIsPlayingOffline) return false;
+      getAllOfflineSongs().then(list => {
+        if (!list || list.length === 0) return;
+        const curId = window.__auraCurrentOfflineSongId;
+        let idx = list.findIndex(s => String(s.id) === String(curId));
+        if (idx === -1) idx = 0;
+        let targetIdx = direction === 'prev' ? (idx - 1 + list.length) % list.length : (idx + 1) % list.length;
+        window.auraPlayOfflineSong(list[targetIdx].id);
+      });
+      return true;
+    };
+
+    // Play offline song directly with full Lock Screen Banner & MediaSession integration
     window.auraPlayOfflineSong = async function(songId) {
       const blob = await getOfflineAudioBlob(songId);
-      if (!blob) {
-        alert('Offline audio file not found. Please download again.');
+      if (!blob || blob.size < 1000) {
+        alert('Offline audio file not found or corrupted. Removing from list.');
+        try {
+          const db = await getAudioDB();
+          const tx = db.transaction(DB_STORE, 'readwrite');
+          tx.objectStore(DB_STORE).delete(songId);
+        } catch(_) {}
         return;
       }
+
+      // Track offline playback state
+      window.__auraCurrentOfflineSongId = songId;
+      window.__auraIsPlayingOffline = true;
 
       // Close modal if open
       const modal = document.getElementById('aura-offline-modal');
@@ -1747,6 +1796,38 @@
         songMeta = list.find(s => String(s.id) === String(songId));
       } catch(_) {}
 
+      const songTitle = songMeta?.name || 'Offline Song';
+      const songArtist = songMeta?.artist || 'AuraMusic';
+      const songImg = songMeta?.image || '/logo.png';
+
+      // Set Phone Lock Screen Banner / MediaSession notification
+      if ('mediaSession' in navigator && window.MediaMetadata) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: songTitle,
+            artist: songArtist,
+            album: 'Offline Downloads',
+            artwork: [
+              { src: songImg, sizes: '96x96', type: 'image/jpeg' },
+              { src: songImg, sizes: '128x128', type: 'image/jpeg' },
+              { src: songImg, sizes: '192x192', type: 'image/jpeg' },
+              { src: songImg, sizes: '256x256', type: 'image/jpeg' },
+              { src: songImg, sizes: '512x512', type: 'image/jpeg' }
+            ]
+          });
+          navigator.mediaSession.playbackState = 'playing';
+
+          navigator.mediaSession.setActionHandler('nexttrack', () => {
+            window.__auraSkipOffline('next');
+          });
+          navigator.mediaSession.setActionHandler('previoustrack', () => {
+            window.__auraSkipOffline('prev');
+          });
+        } catch(e) {
+          console.warn('MediaSession banner setup:', e);
+        }
+      }
+
       // If main app player function is available, use it for full UI update
       if (typeof window.__auraPlaySong === 'function' && songMeta) {
         const offlineSong = {
@@ -1759,12 +1840,10 @@
           await window.__auraPlaySong(offlineSong);
         } catch(e) {
           console.warn('__auraPlaySong error:', e);
-          // Fallback to direct audio element
           const audio = document.querySelector('audio');
           if (audio) { audio.src = blobUrl; audio.load(); await audio.play().catch(()=>{}); }
         }
       } else {
-        // Fallback: direct audio element play
         const audio = document.querySelector('audio');
         if (!audio) { alert('Audio player not ready'); return; }
         audio.src = blobUrl;
@@ -1772,10 +1851,20 @@
         try { await audio.play(); } catch(e) { console.warn('Audio play error:', e); }
       }
 
+      // Attach ended event listener to auto-skip offline
+      const audio = document.querySelector('audio');
+      if (audio) {
+        audio.onended = () => {
+          if (window.__auraIsPlayingOffline) {
+            window.__auraSkipOffline('next');
+          }
+        };
+      }
+
       // Show toast
       const toast = document.createElement('div');
       toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#10b981;color:#000;font-weight:900;font-size:12px;padding:10px 20px;border-radius:9999px;z-index:999999;box-shadow:0 10px 25px rgba(16,185,129,0.5);display:flex;align-items:center;gap:8px;';
-      toast.innerHTML = `<span>▶️</span><span>Playing Offline: ${songMeta ? songMeta.name : 'Track'}</span>`;
+      toast.innerHTML = `<span>▶️</span><span>Playing Offline: ${songTitle}</span>`;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 3500);
     };
@@ -1820,9 +1909,14 @@
                     <p class="text-[10px] text-slate-400 truncate">${s.artist}</p>
                   </div>
                 </div>
-                <button onclick="window.auraPlayOfflineSong('${s.id}')" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black text-xs font-black shadow-md shadow-emerald-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0 flex items-center space-x-1">
-                  <span>▶ Play</span>
-                </button>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button onclick="window.auraPlayOfflineSong('${s.id}')" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black text-xs font-black shadow-md shadow-emerald-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer flex items-center space-x-1">
+                    <span>▶ Play</span>
+                  </button>
+                  <button onclick="window.auraDeleteOfflineSong('${s.id}')" title="Delete offline song" class="p-1.5 rounded-xl bg-white/[0.05] hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-all cursor-pointer">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
               </div>
             `).join('')}
           </div>
@@ -1839,14 +1933,8 @@
     // ────────────────────────────────────────────────────────────────────────
     // D. REAL PHONE STORAGE PERMISSION & OFFLINE DOWNLOAD ENGINE
     // ────────────────────────────────────────────────────────────────────────
-    function requestStoragePermissionFirstTime() {
+    function requestStoragePermissionFirstTime(songTitle) {
       return new Promise((resolve) => {
-        // If already granted once, never ask again
-        if (localStorage.getItem('auramusic_storage_permission_granted') === 'true') {
-          resolve(true);
-          return;
-        }
-
         const modal = document.createElement('div');
         modal.id = 'aura-storage-permission-modal';
         modal.className = 'fixed inset-0 z-[9999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
@@ -1860,17 +1948,17 @@
               </svg>
             </div>
             
-            <h3 class="text-base font-black text-white mb-1">Storage Access</h3>
+            <h3 class="text-base font-black text-white mb-1">Save to Phone Storage</h3>
             <p class="text-xs text-slate-300 leading-relaxed mb-4">
-              AuraMusic wants to access your device storage to download & save songs for <b>Offline Listening</b> without internet.
+              Download <b>"${songTitle || 'Song'}"</b> as an MP3 file to your phone's <b>Downloads</b> folder for offline playback and file manager access.
             </p>
 
             <div class="w-full space-y-2">
               <button id="aura-perm-allow-btn" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-xs hover:opacity-95 active:scale-95 transition-all shadow-md shadow-emerald-500/25 cursor-pointer">
-                Allow Storage Access
+                📥 Download & Save
               </button>
               <button id="aura-perm-deny-btn" class="w-full py-2 px-4 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-white font-bold text-xs transition-all cursor-pointer">
-                Don't Allow
+                Cancel
               </button>
             </div>
           </div>
@@ -1879,7 +1967,6 @@
         document.body.appendChild(modal);
 
         modal.querySelector('#aura-perm-allow-btn').onclick = () => {
-          localStorage.setItem('auramusic_storage_permission_granted', 'true');
           modal.remove();
           resolve(true);
         };
@@ -1891,8 +1978,17 @@
       });
     }
     window.auraDownloadCurrentSong = async function(song) {
-      // Prompt storage permission only on first-time download
-      const hasPermission = await requestStoragePermissionFirstTime();
+      if (!song) {
+        try {
+          const s = localStorage.getItem('auramusic_current_song');
+          if (s) song = JSON.parse(s);
+        } catch(_) {}
+      }
+      if (!song || !song.name) {
+        alert('Please play a song first to download.');
+        return;
+      }
+      const hasPermission = await requestStoragePermissionFirstTime(song.name);
       if (!hasPermission) {
         return; // User declined permission
       }
@@ -1937,17 +2033,16 @@
         // 1. Save into IndexedDB for in-app offline playback
         await saveOfflineAudio(song, blob);
 
-        // 2. Direct silent download to device storage (NO popup/picker dialog every time!)
-        const blobUrl = URL.createObjectURL(blob);
+        // 2. Direct MP3 download for Phone File Manager (Downloads folder)
+        const cleanId = (song.videoId || song.id || '').replace(/^yt_|^yt-/, '').trim();
         const a = document.createElement('a');
         a.style.display = 'none';
-        a.href = blobUrl;
+        a.href = `/api/yt/download?id=${encodeURIComponent(cleanId)}&title=${encodeURIComponent(song.name)}&artist=${encodeURIComponent(song.artist || '')}`;
         a.download = filename;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => {
           document.body.removeChild(a);
-          URL.revokeObjectURL(blobUrl);
         }, 2000);
 
         toast.style.background = '#059669';

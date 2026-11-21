@@ -771,12 +771,21 @@ function titleKey(title) {
 }
 // Same song = the first words of the titles match (the rest is "Official Video", artist, "Lofi mix"...).
 function sameSong(a, b) {
-  const x = titleKey(a).split(' ').filter(Boolean);
-  const y = titleKey(b).split(' ').filter(Boolean);
+  if (!a || !b) return false;
+  const ka = titleKey(a);
+  const kb = titleKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (ka.length >= 4 && kb.length >= 4) {
+    if (ka.includes(kb) || kb.includes(ka)) return true;
+  }
+  const x = ka.split(' ').filter(Boolean);
+  const y = kb.split(' ').filter(Boolean);
   if (!x.length || !y.length) return false;
   const n = Math.min(x.length, y.length, 3);
-  for (let i = 0; i < n; i++) if (x[i] !== y[i]) return false;
-  return n >= 2 || x[0].length >= 4;
+  let match = true;
+  for (let i = 0; i < n; i++) if (x[i] !== y[i]) { match = false; break; }
+  return match && (n >= 2 || x[0].length >= 4);
 }
 
 // Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
@@ -1110,21 +1119,34 @@ async function searchYouTube(query) {
 
         const asVideos = found => found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
 
-        // Fill up with similar-artist songs
-        if (picked.length < 8) {
-          const query = `${(artist || title).split(',')[0].trim()} songs`;
-          take(fit(asVideos(await searchYouTube(query))));
+        // Mood & Style clustering: Karan Aujla / Punjabi Swag vs Badmashi vs Romantic vs HipHop
+        const moodText = `${title} ${artist}`.toLowerCase();
+        const isPunjabiGangster = /(karan aujla|moose|shubh|dhillon|amrit maan|prem dhillon|jerry|jordan sandhu|wazir patar|badmashi|jatt|gang|shooter|pistol|bandook|yarri|swag)/i.test(moodText);
+        const isHaryanvi = /(masoom sharma|ajay hooda|diler kharkiya|khasa aala|gulzaar|amit saini|badmashi|haryanvi)/i.test(moodText);
+        const isHipHop = /(divine|mc stan|seedhe maut|raftaar|kr\$na|king|emiway)/i.test(moodText);
+
+        const PUNJABI_TOP = ['Karan Aujla', 'Sidhu Moose Wala', 'Shubh', 'AP Dhillon', 'Diljit Dosanjh', 'Amrit Maan', 'Prem Dhillon', 'Wazir Patar'];
+        const HARYANVI_TOP = ['Masoom Sharma', 'Ajay Hooda', 'Diler Kharkiya', 'Khasa Aala Chahar', 'Gulzaar Chhaniwala'];
+        const HIPHOP_TOP = ['DIVINE', 'MC Stan', 'Seedhe Maut', 'Raftaar', 'KR$NA', 'King', 'Emiway'];
+
+        if (picked.length < 10) {
+          if (isPunjabiGangster) {
+            const artistPick = PUNJABI_TOP[Math.floor(Math.random() * PUNJABI_TOP.length)];
+            take(keepIndian(asVideos(await searchYouTube(`${artistPick} punjabi top hit songs`))));
+          } else if (isHaryanvi) {
+            const artistPick = HARYANVI_TOP[Math.floor(Math.random() * HARYANVI_TOP.length)];
+            take(keepIndian(asVideos(await searchYouTube(`${artistPick} haryanvi badmashi songs`))));
+          } else if (isHipHop) {
+            const artistPick = HIPHOP_TOP[Math.floor(Math.random() * HIPHOP_TOP.length)];
+            take(keepIndian(asVideos(await searchYouTube(`${artistPick} desi hip hop rap`))));
+          } else {
+            const cleanArt = (artist || title).split(',')[0].trim();
+            take(fit(asVideos(await searchYouTube(`${cleanArt} best songs`))));
+          }
         }
-        // If Indian taste, add language-specific songs
-        if (picked.length < 8 && wantIndian) {
-          const subLang = /punjabi/i.test(`${title} ${artist}`) ? 'punjabi hits' :
-                          /bhojpuri/i.test(`${title} ${artist}`) ? 'bhojpuri hits' : 'hindi hits';
-          take(keepIndian(asVideos(await searchYouTube(`${(artist || '').split(',')[0].trim()} ${subLang}`))));
-        }
-        // Last resort: trending Indian songs
         if (picked.length < 8 && wantIndian) {
           const pick = TRENDING_ARTISTS[Math.floor(Math.random() * TRENDING_ARTISTS.length)];
-          take(keepIndian(asVideos(await searchYouTube(`${pick} popular songs`))));
+          take(keepIndian(asVideos(await searchYouTube(`${pick} top songs`))));
         }
         // If still not enough and English taste, add English similar songs
         if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
@@ -1273,6 +1295,50 @@ async function searchYouTube(query) {
         const id = (parsedUrl.searchParams.get('id') || 'dQw4w9WgXcQ').replace(/^yt_|^yt-/, '').trim();
         const report = await diagnose(ytAudioClient, id, getClientIp(req));
         return sendJson(res, 200, report);
+      }
+
+            // Direct MP3 download endpoint for phone storage / Android File Manager
+      if (pathname === '/api/yt/download') {
+        const id = parsedUrl.searchParams.get('id') || '';
+        const cleanId = id.replace(/^yt_|^yt-/, '').trim();
+        const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || 'Song';
+        const qArtist = parsedUrl.searchParams.get('artist') || 'AuraMusic';
+        const safeFilename = `${qTitle.replace(/[/\\?%*:|"<>]/g, '')} - ${qArtist.replace(/[/\\?%*:|"<>]/g, '')}.mp3`;
+
+        let streamUrl = null;
+        try {
+          const fast = await resolveFastAudio(cleanId, qTitle, qArtist);
+          if (fast?.streamUrl) streamUrl = fast.streamUrl;
+        } catch (_) {}
+
+        if (!streamUrl) {
+          const clientIp = getClientIp(req);
+          const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
+          if (resolved?.streamUrl) streamUrl = resolved.streamUrl;
+        }
+
+        if (streamUrl) {
+          try {
+            const audioRes = await fetch(streamUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+            });
+            if (audioRes.ok) {
+              res.writeHead(200, {
+                'Content-Type': 'audio/mpeg',
+                'Content-Disposition': `attachment; filename="${encodeURIComponent(safeFilename)}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
+                'Content-Length': audioRes.headers.get('content-length') || '',
+                'Access-Control-Allow-Origin': '*'
+              });
+              const { Readable } = await import('stream');
+              const stream = Readable.fromWeb(audioRes.body);
+              stream.pipe(res);
+              return;
+            }
+          } catch (e) {
+            console.warn('[DOWNLOAD] Pipe stream error:', e.message);
+          }
+        }
+        return sendJson(res, 500, { error: 'Failed to download stream' });
       }
 
       if (pathname === '/api/yt/stream') {
