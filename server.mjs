@@ -164,7 +164,7 @@ async function loadState() {
 
 async function saveState(before) {
   const after = JSON.stringify(snapshotState());
-  if (after !== before) await kvSetRaw(STATE_KEY, after);
+  if (!before || after !== before) await kvSetRaw(STATE_KEY, after);
 }
 
 const MIME_TYPES = {
@@ -437,6 +437,10 @@ const server = http.createServer(async (req, res) => {
 
         memoryDb.users.push(newUser);
         saveDatabase();
+        if (redisEnabled) {
+          try { await saveState(); console.log('✅ [NEON DB] Saved new user:', newUser.email); }
+          catch (err) { console.error('❌ [NEON DB ERROR on user register]:', err.message); }
+        }
         const sessionToken = crypto.randomBytes(32).toString('hex');
         memoryDb.activeSessions[sessionToken] = {
           user: newUser,
@@ -568,6 +572,10 @@ const server = http.createServer(async (req, res) => {
           };
           memoryDb.users.push(user);
           saveDatabase();
+          if (redisEnabled) {
+            try { await saveState(); console.log('✅ [NEON DB] Saved Google user:', user.email); }
+            catch (err) { console.error('❌ [NEON DB ERROR on Google login]:', err.message); }
+          }
           console.log(`✅ [GOOGLE USER CREATED VIA CONSENT] ${user.email} (${user.name})`);
         } else {
           if (name && (!user.name || user.name === user.email.split('@')[0])) {
