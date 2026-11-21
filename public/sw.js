@@ -1,4 +1,4 @@
-const CACHE_NAME = 'auramusic-v3.18';
+const CACHE_NAME = 'auramusic-v3.20';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -6,10 +6,14 @@ const STATIC_ASSETS = [
   '/logo.png',
   '/icon-192.png',
   '/icon-512.png',
+  '/assets/index-aura3.js',
+  '/assets/index-D7KSEyRA.css',
+  '/prefetch.v3.js',
+  '/freefy-auth.js',
   '/aura-smart.js'
 ];
 
-// Install: Cache core app shell
+// Install: Cache complete app shell for full offline support
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -37,11 +41,11 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: Network first for APIs and Audio streams, Stale-while-revalidate for static assets
+// Fetch: Network first for APIs, Cache First with Network Fallback for App Shell & Static Assets
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Bypass cache for audio streams, external CDNs, and dynamic APIs
+  // Bypass cache for external CDNs, YouTube API, and dynamic API endpoints
   if (
     url.pathname.startsWith('/api/') ||
     url.hostname.includes('saavncdn.com') ||
@@ -53,18 +57,36 @@ self.addEventListener('fetch', (event) => {
     return; // Direct network
   }
 
-  // Handle HTML navigation (Network First with Cache Fallback)
+  // Handle HTML navigation: Cache first when offline, network first when online
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match('/index.html').then((res) => res || caches.match('/')))
     );
     return;
   }
 
-  // Stale-while-revalidate for local scripts, styles, images
+  // Cache-first strategy for local scripts, css, icons so app opens INSTANTLY offline
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
+      if (cachedResponse) {
+        // Fetch in background to update cache if online
+        fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+          }
+        }).catch(() => {});
+        return cachedResponse;
+      }
+
+      return fetch(event.request).then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -72,9 +94,12 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
+      }).catch(() => {
+        // Offline fallback for assets
+        if (event.request.destination === 'image') {
+          return caches.match('/icon-192.png');
+        }
+      });
     })
   );
 });

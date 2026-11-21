@@ -1820,7 +1820,63 @@
     // ────────────────────────────────────────────────────────────────────────
     // D. REAL PHONE STORAGE PERMISSION & OFFLINE DOWNLOAD ENGINE
     // ────────────────────────────────────────────────────────────────────────
+    function requestStoragePermissionFirstTime() {
+      return new Promise((resolve) => {
+        // If already granted once, never ask again
+        if (localStorage.getItem('auramusic_storage_permission_granted') === 'true') {
+          resolve(true);
+          return;
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'aura-storage-permission-modal';
+        modal.className = 'fixed inset-0 z-[9999999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+        modal.innerHTML = `
+          <div class="w-full max-w-xs bg-[#0e1320] border border-emerald-500/40 rounded-3xl p-5 shadow-[0_0_50px_rgba(16,185,129,0.3)] relative text-white flex flex-col items-center text-center">
+            <div class="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-2xl mb-3 shadow-lg shadow-emerald-500/20 text-emerald-400">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </div>
+            
+            <h3 class="text-base font-black text-white mb-1">Storage Access</h3>
+            <p class="text-xs text-slate-300 leading-relaxed mb-4">
+              AuraMusic wants to access your device storage to download & save songs for <b>Offline Listening</b> without internet.
+            </p>
+
+            <div class="w-full space-y-2">
+              <button id="aura-perm-allow-btn" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-xs hover:opacity-95 active:scale-95 transition-all shadow-md shadow-emerald-500/25 cursor-pointer">
+                Allow Storage Access
+              </button>
+              <button id="aura-perm-deny-btn" class="w-full py-2 px-4 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-white font-bold text-xs transition-all cursor-pointer">
+                Don't Allow
+              </button>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector('#aura-perm-allow-btn').onclick = () => {
+          localStorage.setItem('auramusic_storage_permission_granted', 'true');
+          modal.remove();
+          resolve(true);
+        };
+
+        modal.querySelector('#aura-perm-deny-btn').onclick = () => {
+          modal.remove();
+          resolve(false);
+        };
+      });
+    }
     window.auraDownloadCurrentSong = async function(song) {
+      // Prompt storage permission only on first-time download
+      const hasPermission = await requestStoragePermissionFirstTime();
+      if (!hasPermission) {
+        return; // User declined permission
+      }
       if (!song) {
         try {
           const s = localStorage.getItem('auramusic_current_song');
@@ -1862,41 +1918,18 @@
         // 1. Save into IndexedDB for in-app offline playback
         await saveOfflineAudio(song, blob);
 
-        // 2. Real phone storage save (with File System Access API picker when supported)
-        let savedToStorage = false;
-        if (window.showSaveFilePicker) {
-          try {
-            const handle = await window.showSaveFilePicker({
-              suggestedName: filename,
-              types: [{
-                description: 'MP3 Audio File',
-                accept: { 'audio/mpeg': ['.mp3'] }
-              }]
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            savedToStorage = true;
-          } catch(err) {
-            // User cancelled file picker or browser rejected
-            console.log('File picker cancelled or rejected:', err);
-          }
-        }
-
-        if (!savedToStorage) {
-          // Standard download anchor trigger (prompts storage/downloads save in Android & Web)
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = blobUrl;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
-          }, 2500);
-        }
+        // 2. Direct silent download to device storage (NO popup/picker dialog every time!)
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+        }, 2000);
 
         toast.style.background = '#059669';
         toast.innerHTML = `<span>✅</span><span>Saved to Storage & Offline List!</span>`;
