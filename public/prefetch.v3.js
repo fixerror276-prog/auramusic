@@ -123,6 +123,18 @@
     'yuvan shankar raja','sp balasubramanyam','zahrah s khan','nikhita gandhi','rochak kohli',
     'tanishk bagchi','darshan raval','yasser desai','raghav chaitanya','dhvani bhanushali'
   ]);
+    var WESTERN_ARTISTS_SET = new Set([
+    'ed sheeran','taylor swift','justin bieber','the weeknd','weeknd','dua lipa','billie eilish','imagine dragons',
+    'coldplay','eminem','drake','post malone','bruno mars','adele','rihanna','ariana grande','selena gomez',
+    'charlie puth','shawn mendes','maroon 5','linkin park','marshmello','alan walker','martin garrix','kygo',
+    'avicii','calvin harris','david guetta','onerepublic','sia','katy perry','lady gaga','miley cyrus','harry styles',
+    'olivia rodrigo','sam smith','lewis capaldi','travis scott','kendrick lamar','21 savage','bts','blackpink',
+    'camila cabello','ellie goulding','rema','doja cat','sza','lana del rey','queen','the beatles','michael jackson',
+    'nf','juice wrld','xxxtentacion','lil nas x','lil baby','lil wayne','pitbull','jason derulo','sean paul','akon',
+    'one direction','5 seconds of summer','halsey','the chainsmokers','zedd','tones and i','glass animals','gotye',
+    'khalid','jvke','benson boone','sabrina carpenter','chappell roan','teddy swims','morgan wallen','luke combs',
+    'tyla','burna boy','wizkid','ava max','meghan trainor'
+  ]);
   var INDIC_SCRIPT = /[\u0900-\u097F\u0A00-\u0A7F\u0980-\u09FF\u0B80-\u0BFF\u0C00-\u0C7F\u0AA0-\u0ABF]/;
   var HINDI_WORDS = /\b(tera|mera|meri|teri|tum|hum|dil|pyar|ishq|mohabbat|zindagi|saath|yaar|yaad|bekhayali|kesariya|tujhe|mujhe|humsafar|dilbar|dhadkan|chaand|aankhein|bollywood|hindi|punjabi|bhojpuri)\b/i;
 
@@ -130,44 +142,33 @@
   function songLang(name, artist) {
     var t = String(name || '').toLowerCase();
     var a = String(artist || '').toLowerCase();
-    // Indic script = definite Indian
     if (INDIC_SCRIPT.test(t + a)) return 'in';
-    // Exact artist match
     var parts = a.replace(/[,&]/g, '|').split('|').map(function(x) { return x.trim(); });
     for (var i = 0; i < parts.length; i++) {
       if (INDIAN_ARTISTS_SET.has(parts[i])) return 'in';
     }
-    // Hindi title keywords
     if (HINDI_WORDS.test(t)) return 'in';
-    // Known label signals
-    if (/\b(t.series|zee music|sony music india|tips|saregama|speed records|desi melodies|lahari|hungama|aditya music)\b/i.test(t + a)) return 'in';
+    if (/\b(t.series|zee music|sony music india|tips|saregama|speed records|desi melodies|lahari|hungama|aditya music|white hill|geet mp3)\b/i.test(t + a)) return 'in';
+    // Check Western artist set
+    if (WESTERN_ARTISTS_SET.has(a)) return 'en';
+    for (var j = 0; j < parts.length; j++) {
+      if (WESTERN_ARTISTS_SET.has(parts[j])) return 'en';
+    }
+    if (/\bvevo\b/i.test(a)) return 'en';
     return '';
   }
 
   // Determine user's dominant taste from recent plays: 'in', 'en', or ''
   function tasteLang() {
-    var rec = recent().slice(-15);
-    var ind = 0, eng = 0;
-    rec.forEach(function(h) {
-      var l = songLang(h.name, h.artist);
-      if (l === 'in') ind++;
-      else if (l === 'en') eng++;
-    });
-    if (ind + eng === 0) return '';
-    // 60%+ = locked to that language
-    if (ind / (ind + eng) >= 0.6) return 'in';
-    if (eng / (ind + eng) >= 0.6) return 'en';
-    return '';
+    // Strictly locked to Indian (Hindi/Punjabi) for all auto-suggestions and play queue
+    return 'in';
   }
 
-  // Filter list to match user's taste
+  // Filter list to match user's taste (Strict: never allow English in queue/autoplay)
   function applyTasteLock(list, taste) {
-    if (!taste) return list;
-    if (taste === 'in') {
-      var indian = list.filter(function(s) { return songLang(s.name, s.artist) !== 'en'; });
-      return indian.length >= 3 ? indian : list; // at least 3 songs, else keep all
-    }
-    return list;
+    return (list || []).filter(function(s) {
+      return songLang(s.name, s.artist) !== 'en';
+    });
   }
 
   // ── Core dedup + history ─────────────────────────────────────────────────

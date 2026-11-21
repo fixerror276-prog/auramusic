@@ -1227,7 +1227,7 @@ async function searchYouTube(query) {
         // 3. Fallback: Trending Hindi & Global chart hits if cold start / empty history
         if (pool.length < 5) {
           try {
-            const trendingQuery = artist ? `${artist} songs` : 'Trending songs new 2026';
+            const trendingQuery = artist ? `${artist} songs` : 'Trending Hindi Punjabi songs 2026';
             const trendingSongs = await searchYouTube(trendingQuery);
             addItems(trendingSongs);
           } catch (_) {}

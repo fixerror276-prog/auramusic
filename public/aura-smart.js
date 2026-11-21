@@ -1141,6 +1141,7 @@
     }
 
     function injectAdminUpdateTab() {
+      if (sessionStorage.getItem('auramusic_admin_unlocked') !== 'true') return;
       // Find admin nav tabs container in dashboard
       const nav = document.querySelector('header + main, div[class*="admin"], nav[class*="space-x"]');
       const tabsContainer = document.querySelector('.overflow-x-auto .flex.items-center.space-x-1, .overflow-x-auto .flex.items-center.space-x-2');

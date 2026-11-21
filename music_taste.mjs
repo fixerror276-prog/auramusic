@@ -71,26 +71,35 @@ export function indianShare(recent) {
 
 // Does the listener want Indian songs right now?
 export function prefersIndian(seed, recent) {
-  const l = songLanguage(seed.title, seed.artist);
-  if (l === 'in') return true;
+  // User strict requirement: suggestions and play queue must default to Indian (Hindi/Punjabi)
+  const l = songLanguage(seed?.title || '', seed?.artist || '');
   if (l === 'en') return false;
-  return indianShare(recent) >= 0.5;
+  return true;
 }
 
 // Keep songs that fit the language: Indian songs first, unknown ones after, Western ones dropped.
 export function keepIndian(list) {
-  const ind = [], unknown = [];
+  const ind = [];
   for (const v of list) {
-    const l = songLanguage(v.title, v.artist);
-    if (l === 'in') ind.push(v);
-    else if (l === '') unknown.push(v);
+    const l = songLanguage(v.title || v.name || '', v.artist || '');
+    if (l === 'in') {
+      ind.push(v);
+    } else if (l !== 'en') {
+      // If unknown, ensure no obvious English words before allowing
+      const t = String(v.title || v.name || '').toLowerCase();
+      const a = String(v.artist || '').toLowerCase();
+      if (!/\b(vevo|feat\.|ft\.|summer|lyrics|official audio|acoustic)\b/i.test(a) &&
+          !/\b(remix english|english version|pop hits|billboard)\b/i.test(t)) {
+        ind.push(v);
+      }
+    }
   }
-  return [...ind, ...unknown];
+  return ind;
 }
 
 // Popular Indian singers: used for the default "trending" search.
 export const TRENDING_ARTISTS = [
-  'Arijit Singh', 'Shreya Ghoshal', 'Atif Aslam', 'Diljit Dosanjh', 'Sidhu Moose Wala', 'Karan Aujla', 'AP Dhillon',
+  'Karan Aujla', 'Sidhu Moose Wala', 'Diljit Dosanjh', 'AP Dhillon', 'Arijit Singh', 'Shubh', 'Badshah', 'Yo Yo Honey Singh', 'King', 'Anuv Jain', 'Shreya Ghoshal', 'Atif Aslam',
   'Badshah', 'Yo Yo Honey Singh', 'Neha Kakkar', 'Jubin Nautiyal', 'Sonu Nigam', 'Guru Randhawa', 'B Praak',
   'Darshan Raval', 'Armaan Malik', 'Vishal Mishra', 'Kumar Sanu', 'Udit Narayan', 'Kishore Kumar', 'Lata Mangeshkar',
   'Mohammed Rafi', 'A R Rahman', 'Sunidhi Chauhan', 'Anuv Jain', 'Mohit Chauhan', 'KK', 'Alka Yagnik', 'Mika Singh', 'Jass Manak'
