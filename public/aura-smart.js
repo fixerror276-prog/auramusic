@@ -1754,6 +1754,34 @@
     window.__auraCurrentOfflineSongId = null;
     window.__auraIsPlayingOffline = false;
 
+    // Expose getOfflineBlob globally so index-aura3.js Te() can check IndexedDB
+    window.__auraGetOfflineBlob = async function(songId) {
+      if (!songId) return null;
+      try { return await getOfflineAudioBlob(songId); } catch(_) { return null; }
+    };
+
+    // Expose getAllOfflineSongs globally for offline auto-play
+    window.__auraGetAllOfflineSongs = async function() {
+      try { return await getAllOfflineSongs(); } catch(_) { return []; }
+    };
+
+    // Global interceptor: when any song card is tapped while offline,
+    // automatically check IndexedDB and play offline blob if available
+    window.__auraOfflineIntercept = async function(song) {
+      if (navigator.onLine) return false; // online, skip intercept
+      if (!song) return false;
+      const songId = song.id || ('yt_' + (song.videoId || ''));
+      if (!songId) return false;
+      // Check if song is downloaded
+      const blob = await window.__auraGetOfflineBlob(songId);
+      if (blob && blob.size > 1000) {
+        // Play from IndexedDB directly
+        await window.auraPlayOfflineSong(songId);
+        return true; // intercepted
+      }
+      return false; // not downloaded, show No Internet popup
+    };
+
     window.__auraSkipOffline = function(direction = 'next') {
       if (!window.__auraIsPlayingOffline) return false;
       getAllOfflineSongs().then(list => {
@@ -1868,6 +1896,50 @@
       toast.innerHTML = `<span>▶️</span><span>Playing Offline: ${songTitle}</span>`;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 3500);
+    };
+
+    // Global No Internet Popup Modal
+    window.auraShowNoInternetModal = function(songTitle) {
+      if (document.getElementById('aura-no-internet-modal')) return;
+      const modal = document.createElement('div');
+      modal.id = 'aura-no-internet-modal';
+      modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn select-none';
+      modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; height:100% !important; z-index:2147483647 !important; background:rgba(0,0,0,0.85) !important; backdrop-filter:blur(10px) !important; display:flex !important; align-items:center !important; justify-content:center !important; padding:16px !important; margin:0 !important;';
+      modal.innerHTML = `
+        <div class="w-full max-w-xs bg-[#0e1320] border border-red-500/40 rounded-3xl p-5 shadow-[0_0_50px_rgba(239,68,68,0.3)] relative text-white flex flex-col items-center text-center">
+          <div class="w-14 h-14 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-3xl mb-3 shadow-lg shadow-red-500/20 text-red-400">
+            📡
+          </div>
+          <h3 class="text-base font-black text-white mb-1.5">No Internet Connection</h3>
+          <p class="text-xs text-slate-300 leading-relaxed mb-4">
+            <b>"${songTitle || 'This song'}"</b> is not downloaded on this device.<br>
+            Please turn on mobile data or Wi-Fi, or listen to your downloaded offline songs.
+          </p>
+          <div class="w-full space-y-2">
+            <button id="aura-no-internet-offline-btn" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-xs hover:opacity-95 active:scale-95 transition-all shadow-md shadow-emerald-500/25 cursor-pointer">
+              🎵 Open Offline Songs
+            </button>
+            <button id="aura-no-internet-cancel-btn" class="w-full py-2 px-4 rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-slate-300 font-bold text-xs transition-all cursor-pointer">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+      const offlineBtn = modal.querySelector('#aura-no-internet-offline-btn');
+      if (offlineBtn) {
+        offlineBtn.addEventListener('click', () => {
+          modal.remove();
+          showDownloadedSongsModal();
+        });
+      }
+      const cancelBtn = modal.querySelector('#aura-no-internet-cancel-btn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => modal.remove());
+      }
     };
 
     // Modal to view and play offline downloaded songs
