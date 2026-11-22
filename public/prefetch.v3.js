@@ -195,6 +195,17 @@
     return short.split(' ').length >= 3 && short.length >= 8 && (' ' + long + ' ').indexOf(' ' + short + ' ') !== -1;
   }
 
+
+  // Mood: love songs must not get rowdy / party songs (same rules as the server).
+  var ROWDY_A = /(karan aujla|sidhu moose|moose wala|shubh|ap dhillon|prem dhillon|amrit maan|jordan sandhu|wazir patar|badshah|honey singh|yo yo|mc stan|divine|raftaar|seedhe maut|emiway|kr\$na|king\b|masoom sharma|ajay hooda|diler kharkiya|khasa aala|gulzaar|sapna choudhary|renuka panwar|mika singh|sukh-e|bohemia|ikka|g khan)/i, ROWDY_W = /\b(badmash|badmashi|badmaash|gangster|gangsta|gang\b|jatt|jatti|gabru|bandook|pistol|shooter|daaru|sharab|peg\b|club|party|dj\b|dance|item|desi hip ?hop|rap\b|drill|haryanvi|bhojpuri|attitude|swag|baap|dhamaka|thumka|chhori|laundiya|nashe|nasha|bass boosted|mashup|remix)\b/i;
+  var ROMANTIC_A = /(arijit singh|atif aslam|jubin nautiyal|vishal mishra|mithoon|pritam|\bkk\b|shreya ghoshal|armaan malik|darshan raval|anuv jain|mohit chauhan|kumar sanu|udit narayan|alka yagnik|jasleen royal|b praak|palak muchhal|rahat fateh|sonu nigam|yasser desai|asees kaur|prateek kuhad|payal dev)/i, ROMANTIC_W = /\b(pyaar|pyar|ishq|ishk|mohabbat|muhabbat|love|dil\b|sanam|sajna|sajan|humsafar|tum hi|tum ho|tujhe|tere liye|tera ban|tera hone|kesariya|saiyaara|rangrez|raabta|khwab|khwabo|bekhayali|hawa banke|dhadkan|aashiqui|mahiya|soniye|ve kamleya|channa mereya|hum jee lenge|judaai|bewafa|tanha|yaad|intezaar|romantic)\b/i;
+  function songMood(name, artist) {
+    var t = String(name || '') + ' ' + String(artist || '');
+    if (ROWDY_W.test(t) || ROWDY_A.test(t)) return 'rowdy';
+    if (ROMANTIC_W.test(t) || ROMANTIC_A.test(t)) return 'romantic';
+    return '';
+  }
+
   // Everything after the playing song: drop other versions of songs already in the queue
   // or already played, so "next" never gives the same song again.
   function cleanQueue(cur, queue) {
@@ -202,11 +213,17 @@
     if (at < 0) return queue;
     var kept = [];
     var out = [];
+    var curMood = songMood(cur.name, cur.artist);
+    var perArtist = {};
     for (var i = 0; i < queue.length; i++) {
       var s = queue[i];
       if (i <= at) { out.push(s); kept.push(s); continue; }
       var dup = kept.some(function(k) { return k.id === s.id || same(k.name, s.name); }) || wasPlayed(s);
-      if (!dup) { out.push(s); kept.push(s); }
+      var m = songMood(s.name, s.artist);
+      var wrongMood = (curMood === 'romantic' && m === 'rowdy') || (curMood === 'rowdy' && m === 'romantic');
+      var who = String(s.artist || '').toLowerCase().split(/[,&]/)[0].trim();
+      var tooMany = who && (perArtist[who] || 0) >= 2;   // variety: max 2 songs per singer ahead
+      if (!dup && !wrongMood && !tooMany) { out.push(s); kept.push(s); if (who) perArtist[who] = (perArtist[who] || 0) + 1; }
     }
     return out;
   }

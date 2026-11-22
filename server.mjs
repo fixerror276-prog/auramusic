@@ -9,7 +9,7 @@ const ytAudioClient = new Ytdl({
 });
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon } from './store.mjs';
-import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS } from './music_taste.mjs';
+import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
@@ -1137,7 +1137,9 @@ async function searchYouTube(query) {
 
         // Strict filter when lang is explicitly set by client (Taste Lock ON)
         const strictLock = clientLang === 'in';
-        const fit = list => {
+        const seedMood = songMood(title, artist);
+        const fit = list0 => {
+          const list = fitMood(seedMood, list0); // love songs never get party / rowdy songs
           if (!wantIndian) return list;
           const filtered = keepIndian(list);
           // In strict mode, never let foreign songs in; in soft mode, allow if too few results
@@ -1169,14 +1171,18 @@ async function searchYouTube(query) {
           } else if (isHipHop) {
             const artistPick = HIPHOP_TOP[Math.floor(Math.random() * HIPHOP_TOP.length)];
             take(keepIndian(asVideos(await searchYouTube(`${artistPick} desi hip hop rap`))));
+          } else if (seedMood === 'romantic') {
+            const artistPick = ROMANTIC_TOP[Math.floor(Math.random() * ROMANTIC_TOP.length)];
+            take(fit(asVideos(await searchYouTube(`${artistPick} romantic hindi songs`))));
           } else {
             const cleanArt = (artist || title).split(',')[0].trim();
             take(fit(asVideos(await searchYouTube(`${cleanArt} best songs`))));
           }
         }
         if (picked.length < 8 && wantIndian) {
-          const pick = TRENDING_ARTISTS[Math.floor(Math.random() * TRENDING_ARTISTS.length)];
-          take(keepIndian(asVideos(await searchYouTube(`${pick} top songs`))));
+          const pool = seedMood === 'romantic' ? ROMANTIC_TOP : TRENDING_ARTISTS;
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          take(fit(asVideos(await searchYouTube(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
         }
         // If still not enough and English taste, add English similar songs
         if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
@@ -1184,7 +1190,7 @@ async function searchYouTube(query) {
         }
 
         res.setHeader('Cache-Control', 'public, max-age=120');
-        return sendJson(res, 200, picked.slice(0, 20).map(toSong));
+        return sendJson(res, 200, limitPerArtist(picked, 2).slice(0, 20).map(toSong));
       }
 
       // ============================================================================

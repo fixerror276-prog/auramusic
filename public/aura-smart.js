@@ -2160,20 +2160,9 @@
         fullscreenControls.appendChild(dlBtn);
       }
 
-      // 2. Bottom Mini-Player Bar (direct download from wherever user is)
-      const miniActions = document.querySelector('button[title*="Liked"]');
-      if (miniActions && miniActions.parentElement && !document.getElementById('aura-mini-download-btn')) {
-        const miniDlBtn = document.createElement('button');
-        miniDlBtn.id = 'aura-mini-download-btn';
-        miniDlBtn.title = 'Download Song to Phone';
-        miniDlBtn.className = 'p-1 sm:p-1.5 text-slate-400 hover:text-emerald-400 rounded-full hover:bg-white/[0.06] transition-all cursor-pointer flex items-center justify-center';
-        miniDlBtn.innerHTML = `<svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>`;
-        miniDlBtn.onclick = function(e) {
-          e.stopPropagation();
-          window.auraDownloadCurrentSong();
-        };
-        miniActions.parentElement.appendChild(miniDlBtn);
-      }
+      // 2. The bottom mini player has no download button: remove one if an old copy is still on screen.
+      const oldMini = document.getElementById('aura-mini-download-btn');
+      if (oldMini) oldMini.remove();
     }
 
     // ────────────────────────────────────────────────────────────────────────

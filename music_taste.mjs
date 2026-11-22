@@ -104,3 +104,36 @@ export const TRENDING_ARTISTS = [
   'Darshan Raval', 'Armaan Malik', 'Vishal Mishra', 'Kumar Sanu', 'Udit Narayan', 'Kishore Kumar', 'Lata Mangeshkar',
   'Mohammed Rafi', 'A R Rahman', 'Sunidhi Chauhan', 'Anuv Jain', 'Mohit Chauhan', 'KK', 'Alka Yagnik', 'Mika Singh', 'Jass Manak'
 ];
+
+// ── Mood: keep love songs with love songs, and rowdy/party songs with their own kind ──
+const ROWDY_ARTISTS = /(karan aujla|sidhu moose|moose wala|shubh|ap dhillon|prem dhillon|amrit maan|jordan sandhu|wazir patar|badshah|honey singh|yo yo|mc stan|divine|raftaar|seedhe maut|emiway|kr\$na|king\b|masoom sharma|ajay hooda|diler kharkiya|khasa aala|gulzaar|sapna choudhary|renuka panwar|mika singh|sukh-e|bohemia|ikka|g khan)/i;
+const ROWDY_WORDS = /\b(badmash|badmashi|badmaash|gangster|gangsta|gang\b|jatt|jatti|gabru|bandook|pistol|shooter|daaru|sharab|peg\b|club|party|dj\b|dance|item|desi hip ?hop|rap\b|drill|haryanvi|bhojpuri|attitude|swag|baap|dhamaka|thumka|chhori|laundiya|nashe|nasha|bass boosted|mashup|remix)\b/i;
+const ROMANTIC_ARTISTS = /(arijit singh|atif aslam|jubin nautiyal|vishal mishra|mithoon|pritam|\bkk\b|shreya ghoshal|armaan malik|darshan raval|anuv jain|mohit chauhan|kumar sanu|udit narayan|alka yagnik|jasleen royal|b praak|palak muchhal|rahat fateh|sonu nigam|yasser desai|asees kaur|prateek kuhad|payal dev)/i;
+const ROMANTIC_WORDS = /\b(pyaar|pyar|ishq|ishk|mohabbat|muhabbat|love|dil\b|sanam|sajna|sajan|humsafar|tum hi|tum ho|tujhe|tere liye|tera ban|tera hone|kesariya|saiyaara|rangrez|raabta|khwab|khwabo|bekhayali|hawa banke|dhadkan|aashiqui|mahiya|soniye|ve kamleya|channa mereya|hum jee lenge|judaai|bewafa|tanha|yaad|intezaar|romantic)\b/i;
+
+// 'rowdy' | 'romantic' | '' (unknown)
+export function songMood(title, artist) {
+  const text = `${title || ''} ${artist || ''}`;
+  if (ROWDY_WORDS.test(text) || ROWDY_ARTISTS.test(text)) return 'rowdy';
+  if (ROMANTIC_WORDS.test(text) || ROMANTIC_ARTISTS.test(text)) return 'romantic';
+  return '';
+}
+
+// A love-song seed must not get rowdy/party songs; a rowdy seed keeps its own kind.
+export function fitMood(seedMood, list) {
+  if (seedMood === 'romantic') return list.filter(v => songMood(v.title, v.artist) !== 'rowdy');
+  if (seedMood === 'rowdy') return list.filter(v => songMood(v.title, v.artist) !== 'romantic');
+  return list;
+}
+
+// No more than `max` songs by the same singer in a row of suggestions (variety).
+export function limitPerArtist(list, max = 2) {
+  const count = {};
+  return list.filter(v => {
+    const a = String(v.artist || '').toLowerCase().split(/[,&]/)[0].trim() || v.videoId;
+    count[a] = (count[a] || 0) + 1;
+    return count[a] <= max;
+  });
+}
+
+export const ROMANTIC_TOP = ['Arijit Singh', 'Atif Aslam', 'Jubin Nautiyal', 'Vishal Mishra', 'Shreya Ghoshal', 'Armaan Malik', 'Darshan Raval', 'Anuv Jain', 'Mithoon', 'Pritam'];
