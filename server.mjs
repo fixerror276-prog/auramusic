@@ -1189,8 +1189,48 @@ async function searchYouTube(query) {
           take(asVideos(await searchYouTube(`${(artist || title).split(',')[0].trim()} best songs`)));
         }
 
+        // ── Singer flow: 2-4 popular songs of the singer you played, then a similar singer, and so on ──
+        const LABEL = /(t-?series|sony music|zee music|tips|saregama|speed records|times music|yrf|yash raj|eros|lahari|vevo|records|music company|films|official|unknown artist|topic$|^various)/i;
+        const singerOf = v => String(v.artist || '').replace(/\s*-\s*topic$/i, '').split(/[,&]|\bfeat\.?\b|\bft\.?\b|\bx\b/i)[0].trim();
+        const isSinger = n => n && n.length > 2 && !LABEL.test(n);
+        const norm = n => n.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+        const order = [];                       // singers in play order
+        const addSinger = n => { if (isSinger(n) && !order.some(o => norm(o) === norm(n))) order.push(n); };
+        addSinger(singerOf({ artist }));
+        for (const v of picked) addSinger(singerOf(v));
+        const singers = order.slice(0, 6);
+
+        const byFlow = [];
+        const known = new Set();
+        const pushFlow = v => {
+          if (!v?.videoId || v.videoId === id || known.has(v.videoId)) return false;
+          if (sameSong(v.title, title) || byFlow.some(b => sameSong(b.title, v.title))) return false;
+          const dur = Number(v.duration) || 0;
+          if (dur && (dur < 60 || dur > 600)) return false;
+          if (/(station|jukebox|non[- ]?stop|full album|playlist|mashup|\bmix\b|\d+ hours?)/i.test(v.title)) return false;
+          known.add(v.videoId); byFlow.push(v); return true;
+        };
+
+        if (singers.length) {
+          // Each singer's own popular songs (searched in parallel), falling back to what related already found.
+          const groups = await Promise.all(singers.map(async n => {
+            const own = picked.filter(v => norm(singerOf(v)) === norm(n));
+            let found = [];
+            try { found = fit(asVideos(await searchYouTube(`${n} popular songs`))); } catch (_) {}
+            found = found.filter(v => norm(singerOf(v)) === norm(n) || norm(String(v.artist || '')).includes(norm(n)));
+            return [...own, ...found];
+          }));
+          // 3 from the played singer, then 3, 3, 2, ... from the next singers
+          const take = [3, 3, 3, 3, 2, 2];
+          groups.forEach((g, gi) => { let got = 0; for (const v of g) { if (got >= take[gi]) break; if (pushFlow(v)) got++; } });
+        }
+        // Anything else related still fills the queue after the flow.
+        for (const v of limitPerArtist(picked, 2)) pushFlow(v);
+
+        const result = byFlow.length >= 4 ? byFlow : limitPerArtist(picked, 2);
         res.setHeader('Cache-Control', 'public, max-age=120');
-        return sendJson(res, 200, limitPerArtist(picked, 2).slice(0, 20).map(toSong));
+        return sendJson(res, 200, result.slice(0, 20).map(toSong));
       }
 
       // ============================================================================

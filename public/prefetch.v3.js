@@ -219,6 +219,10 @@
   // Everything after the playing song: drop other versions of songs already in the queue
   // or already played, so "next" never gives the same song again.
   var JUNK = /\b(station|jukebox|non[- ]?stop|full album|playlist|mashup|mix\b|hours?\b|live stream|radio|best of|top \d+|collection)\b/i;
+  // Was this song tapped on the Search page? (its queue is then just the search results)
+  function fromSearch() {
+    try { return !!document.querySelector('input[placeholder^="Search Hindi"]'); } catch (e) { return false; }
+  }
   function cleanQueue(cur, queue) {
     var at = queue.findIndex(function(s) { return s.id === cur.id; });
     if (at < 0) return queue;
@@ -350,12 +354,19 @@
 
     // ── DUPLICATE REMOVAL: even 1 duplicate triggers trim (was 2) ──────────
     needs: function(cur, list) {
+      if (fromSearch()) return true;       // tapped from search results: build the singer flow instead
       for (var i = 0; i < list.length; i++) {
         if (list[i].id !== cur.id && same(list[i].name, cur.name)) return true;
       }
       return false;
     },
     trim: function(cur, list) {
+      if (fromSearch()) {
+        // The rest of the search list is just look-alike titles. Keep what is before the song, drop what is after;
+        // the server then sends this singer's popular songs, then similar singers.
+        var at = list.findIndex(function(s) { return s.id === cur.id; });
+        return at < 0 ? list : list.slice(0, at + 1);
+      }
       // Keep only the BEST version (first occurrence = highest quality from server)
       return cleanQueue(cur, list);
     },
