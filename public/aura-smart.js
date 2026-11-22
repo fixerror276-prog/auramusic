@@ -2008,6 +2008,8 @@
     // D. REAL PHONE STORAGE PERMISSION & OFFLINE DOWNLOAD ENGINE
     // ────────────────────────────────────────────────────────────────────────
     function requestStoragePermissionFirstTime(songTitle) {
+      // Ask only the first time; after "Download & Save" every other song just downloads.
+      try { if (localStorage.getItem('aura_storage_perm_v1') === 'granted') return Promise.resolve(true); } catch (_) {}
       return new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.id = 'aura-storage-permission-modal';
@@ -2042,6 +2044,7 @@
         document.body.appendChild(modal);
 
         modal.querySelector('#aura-perm-allow-btn').onclick = () => {
+          try { localStorage.setItem('aura_storage_perm_v1', 'granted'); } catch (_) {}
           modal.remove();
           resolve(true);
         };
@@ -2084,8 +2087,9 @@
 
       // Show toast
       const toast = document.createElement('div');
-      toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#10b981;color:#000;font-weight:900;font-size:12px;padding:10px 20px;border-radius:9999px;z-index:999999;box-shadow:0 10px 25px rgba(16,185,129,0.5);display:flex;items-center;gap:8px;';
-      toast.innerHTML = `<span>⏳</span><span>Downloading "${songTitle}" to phone storage...</span>`;
+      const TOAST_CSS = 'position:fixed;bottom:104px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.92);color:#fff;font-weight:600;font-size:11px;line-height:1;padding:7px 14px;border-radius:9999px;z-index:999999;white-space:nowrap;pointer-events:none;';
+      toast.style.cssText = TOAST_CSS;
+      toast.textContent = 'Downloading…';
       document.body.appendChild(toast);
 
       try {
@@ -2120,9 +2124,8 @@
           document.body.removeChild(a);
         }, 2000);
 
-        toast.style.background = '#059669';
-        toast.innerHTML = `<span>✅</span><span>Saved to Storage & Offline List!</span>`;
-        setTimeout(() => toast.remove(), 3500);
+        toast.textContent = 'Downloaded ✓';
+        setTimeout(() => toast.remove(), 2500);
       } catch (err) {
         console.warn('Direct blob download fallback:', err);
         const a = document.createElement('a');
@@ -2134,9 +2137,8 @@
         a.click();
         setTimeout(() => document.body.removeChild(a), 2000);
 
-        toast.style.background = '#059669';
-        toast.innerHTML = `<span>🎵</span><span>Download started!</span>`;
-        setTimeout(() => toast.remove(), 3000);
+        toast.textContent = 'Download started';
+        setTimeout(() => toast.remove(), 2500);
       }
     };
 

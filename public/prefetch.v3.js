@@ -180,21 +180,31 @@
       .trim();
   }
 
-  // Same song = first words match (regardless of "Official Video", "Lofi", etc.)
-  function same(a, b) {
-    var x = key(a).split(' ').filter(Boolean);
-    var y = key(b).split(' ').filter(Boolean);
-    if (!x.length || !y.length) return false;
-    var n = Math.min(x.length, y.length, 3);
-    var starts = true;
-    for (var i = 0; i < n; i++) if (x[i] !== y[i]) { starts = false; break; }
-    if (starts && (n >= 2 || x[0].length >= 4)) return true;
-    // "Meri Aashiqui Ab Tum Hi Ho" is still "Tum Hi Ho": the shorter title sits inside the longer one.
-    var sx = x.join(' '), sy = y.join(' ');
-    var short = sx.length <= sy.length ? sx : sy, long = sx.length <= sy.length ? sy : sx;
-    return short.split(' ').length >= 3 && short.length >= 8 && (' ' + long + ' ').indexOf(' ' + short + ' ') !== -1;
+  // Same song? Compare titles by their consonant "skeleton" so spelling variants match
+  // (Raanjhanaa / Ranjhana / RANJHNA) and extra words in the title do not matter.
+  var STOP = /^(a|r|the|and|of|from|movie|film|version|by|with|full|official|lyrical|lyric|video|audio|song|songs|hd|title|track)$/;
+  function skeleton(t) {
+    var words = key(t).split(' ').filter(Boolean);
+    var out = [];
+    for (var i = 0; i < words.length; i++) {
+      if (STOP.test(words[i])) continue;
+      var sk = words[i].replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
+      out.push(sk || words[i]);
+    }
+    return out;
   }
-
+  function same(a, b) {
+    var x = skeleton(a), y = skeleton(b);
+    if (!x.length || !y.length) return false;
+    var small = x.length <= y.length ? x : y, big = x.length <= y.length ? y : x;
+    var hit = 0, pool = big.slice();
+    for (var i = 0; i < small.length; i++) {
+      var at = pool.indexOf(small[i]);
+      if (at !== -1) { hit++; pool.splice(at, 1); }   // each word of the longer title counts once
+    }
+    if (small.join('').length < 4) return false;          // too short to judge
+    return hit / small.length >= 0.75;
+  }
 
   // Mood: love songs must not get rowdy / party songs (same rules as the server).
   var ROWDY_A = /(karan aujla|sidhu moose|moose wala|shubh|ap dhillon|prem dhillon|amrit maan|jordan sandhu|wazir patar|badshah|honey singh|yo yo|mc stan|divine|raftaar|seedhe maut|emiway|kr\$na|king\b|masoom sharma|ajay hooda|diler kharkiya|khasa aala|gulzaar|sapna choudhary|renuka panwar|mika singh|sukh-e|bohemia|ikka|g khan)/i, ROWDY_W = /\b(badmash|badmashi|badmaash|gangster|gangsta|gang\b|jatt|jatti|gabru|bandook|pistol|shooter|daaru|sharab|peg\b|club|party|dj\b|dance|item|desi hip ?hop|rap\b|drill|haryanvi|bhojpuri|attitude|swag|baap|dhamaka|thumka|chhori|laundiya|nashe|nasha|bass boosted|mashup|remix)\b/i;
@@ -208,6 +218,7 @@
 
   // Everything after the playing song: drop other versions of songs already in the queue
   // or already played, so "next" never gives the same song again.
+  var JUNK = /\b(station|jukebox|non[- ]?stop|full album|playlist|mashup|mix\b|hours?\b|live stream|radio|best of|top \d+|collection)\b/i;
   function cleanQueue(cur, queue) {
     var at = queue.findIndex(function(s) { return s.id === cur.id; });
     if (at < 0) return queue;
@@ -218,7 +229,8 @@
     for (var i = 0; i < queue.length; i++) {
       var s = queue[i];
       if (i <= at) { out.push(s); kept.push(s); continue; }
-      var dup = kept.some(function(k) { return k.id === s.id || same(k.name, s.name); }) || wasPlayed(s);
+      var junk = JUNK.test(String(s.name || '')) || (Number(s.duration) > 660);   // playlists, stations, jukeboxes
+      var dup = junk || kept.some(function(k) { return k.id === s.id || same(k.name, s.name); }) || wasPlayed(s);
       var m = songMood(s.name, s.artist);
       var wrongMood = (curMood === 'romantic' && m === 'rowdy') || (curMood === 'rowdy' && m === 'romantic');
       var who = String(s.artist || '').toLowerCase().split(/[,&]/)[0].trim();
