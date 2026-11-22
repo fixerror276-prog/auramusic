@@ -903,6 +903,27 @@ async function trendingIndian() {
   return out;
 }
 
+// Cached, time-boxed search used by the queue builder, so "next songs" arrive in about a second.
+const queueSearchMemo = new Map();           // query -> { at, data }
+const searchInflight = new Map();
+async function searchYTCached(query, maxMs = 1800) {
+  const hit = queueSearchMemo.get(query);
+  if (hit && Date.now() - hit.at < 3600000) return hit.data;
+  let pending = searchInflight.get(query);
+  if (!pending) {
+    pending = searchYouTube(query)
+      .then(data => { if (data && data.length) queueSearchMemo.set(query, { at: Date.now(), data }); return data || []; })
+      .catch(() => [])
+      .finally(() => searchInflight.delete(query));
+    searchInflight.set(query, pending);
+  }
+  return Promise.race([pending, new Promise(r => setTimeout(() => r([]), maxMs))]);
+}
+// Warm the popular singers right after start so the first queues are instant.
+setTimeout(async () => {
+  for (const a of TRENDING_ARTISTS.slice(0, 16)) { await searchYTCached(`${a} popular songs`, 8000); await new Promise(r => setTimeout(r, 400)); }
+}, 4000).unref?.();
+
 async function searchYouTube(query) {
   if (!query || !query.trim()) return [];
   const norm = query.trim().toLowerCase();
@@ -1147,7 +1168,10 @@ async function searchYouTube(query) {
           return filtered.length >= 3 ? filtered : keepIndian(list);
         };
 
-        try { take(fit(await getRelated(ytAudioClient, id))); } catch (_) {}
+        try {
+          const rel = await Promise.race([getRelated(ytAudioClient, id), new Promise(r => setTimeout(() => r([]), 2500))]);
+          take(fit(rel || []));
+        } catch (_) {}
 
         const asVideos = found => found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
 
@@ -1164,29 +1188,29 @@ async function searchYouTube(query) {
         if (picked.length < 10) {
           if (isPunjabiGangster) {
             const artistPick = PUNJABI_TOP[Math.floor(Math.random() * PUNJABI_TOP.length)];
-            take(keepIndian(asVideos(await searchYouTube(`${artistPick} punjabi top hit songs`))));
+            take(keepIndian(asVideos(await searchYTCached(`${artistPick} punjabi top hit songs`))));
           } else if (isHaryanvi) {
             const artistPick = HARYANVI_TOP[Math.floor(Math.random() * HARYANVI_TOP.length)];
-            take(keepIndian(asVideos(await searchYouTube(`${artistPick} haryanvi badmashi songs`))));
+            take(keepIndian(asVideos(await searchYTCached(`${artistPick} haryanvi badmashi songs`))));
           } else if (isHipHop) {
             const artistPick = HIPHOP_TOP[Math.floor(Math.random() * HIPHOP_TOP.length)];
-            take(keepIndian(asVideos(await searchYouTube(`${artistPick} desi hip hop rap`))));
+            take(keepIndian(asVideos(await searchYTCached(`${artistPick} desi hip hop rap`))));
           } else if (seedMood === 'romantic') {
             const artistPick = ROMANTIC_TOP[Math.floor(Math.random() * ROMANTIC_TOP.length)];
-            take(fit(asVideos(await searchYouTube(`${artistPick} romantic hindi songs`))));
+            take(fit(asVideos(await searchYTCached(`${artistPick} romantic hindi songs`))));
           } else {
             const cleanArt = (artist || title).split(',')[0].trim();
-            take(fit(asVideos(await searchYouTube(`${cleanArt} best songs`))));
+            take(fit(asVideos(await searchYTCached(`${cleanArt} best songs`))));
           }
         }
         if (picked.length < 8 && wantIndian) {
           const pool = seedMood === 'romantic' ? ROMANTIC_TOP : TRENDING_ARTISTS;
           const pick = pool[Math.floor(Math.random() * pool.length)];
-          take(fit(asVideos(await searchYouTube(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
+          take(fit(asVideos(await searchYTCached(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
         }
         // If still not enough and English taste, add English similar songs
         if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
-          take(asVideos(await searchYouTube(`${(artist || title).split(',')[0].trim()} best songs`)));
+          take(asVideos(await searchYTCached(`${(artist || title).split(',')[0].trim()} best songs`)));
         }
 
         // ── Singer flow: 2-4 popular songs of the singer you played, then a similar singer, and so on ──
@@ -1217,7 +1241,7 @@ async function searchYouTube(query) {
           const groups = await Promise.all(singers.map(async n => {
             const own = picked.filter(v => norm(singerOf(v)) === norm(n));
             let found = [];
-            try { found = fit(asVideos(await searchYouTube(`${n} popular songs`))); } catch (_) {}
+            try { found = fit(asVideos(await searchYTCached(`${n} popular songs`))); } catch (_) {}
             found = found.filter(v => norm(singerOf(v)) === norm(n) || norm(String(v.artist || '')).includes(norm(n)));
             return [...own, ...found];
           }));

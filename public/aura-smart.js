@@ -709,26 +709,9 @@
     }
   }, true);
 
-  // ── Intercept clicks on song rows: play instantly (<3s) using downloadUrl[last] ──
-  document.addEventListener('click', function(e) {
-    const card = e.target.closest('[class*="song"], [class*="track"], [class*="Card"], [class*="card"], [class*="item"]');
-    if (!card) return;
-
-    // Check if we have cached fast results matching this song
-    const titleEl = card.querySelector('.song-title, [class*="title"], h3, h4, span');
-    const songTitle = (titleEl?.textContent || '').trim().toLowerCase();
-
-    if (window.__auraLastFastSearchResults && songTitle) {
-      const matched = window.__auraLastFastSearchResults.find(s => {
-        const n = (s.name || '').toLowerCase();
-        return n.includes(songTitle) || songTitle.includes(n);
-      });
-      if (matched && Array.isArray(matched.downloadUrl) && matched.downloadUrl.length > 0) {
-        // Play directly via last index downloadUrl (<1.5s start time!)
-        playFastSong(matched);
-      }
-    }
-  }, true);
+  // (Removed) A click interceptor used to guess the song from the card's first text and play a different
+  // JioSaavn match, so the poster and the song that played could differ. The main player now plays exactly
+  // the song that was tapped.
 
   // ── 11. Expose public API for in-app integration ──────────────────────────
   window.__auraSmartFeatures = {
@@ -1721,7 +1704,7 @@
             const rawList = req.result || [];
             const validList = [];
             for (const s of rawList) {
-              if (s && s.blob && s.blob.size > 1000) {
+              if (s && s.blob && s.blob.size > 100 * 1024 && !/^(text|application\/json)/i.test(s.blob.type || '')) {   // a real song, not a stub or an error page
                 validList.push(s);
               } else if (s && s.id) {
                 // Purge dead song records so re-downloading or reinstalling app cleans up broken entries
