@@ -105,6 +105,7 @@ function saveDatabase() {
       recentlyPlayed: memoryDb.recentlyPlayed,
       userTastes: memoryDb.userTastes,
       taste: memoryDb.taste,
+      customTracks: memoryDb.customTracks,
       appUpdate: memoryDb.appUpdate
     }, null, 2), 'utf8');
   } catch (e) {
@@ -123,6 +124,7 @@ const memoryDb = {
   recentlyPlayed: dbData.recentlyPlayed || {},
   userTastes: dbData.userTastes || {},
   taste: dbData.taste || {},
+  customTracks: dbData.customTracks || [],
   appUpdate: dbData.appUpdate || {
     enabled: false,
     title: 'New Update Available!',
@@ -137,7 +139,7 @@ const memoryDb = {
 // whole state is loaded at the start of each API request and saved before the
 // response is sent (only if something changed).
 const STATE_KEY = 'auramusic:state:v1';
-const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'userTastes', 'taste', 'appUpdate', 'adminKeys'];
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'userTastes', 'taste', 'customTracks', 'appUpdate', 'adminKeys'];
 
 function snapshotState() {
   return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
@@ -1050,7 +1052,22 @@ async function searchYouTube(query) {
         const query = parsedUrl.searchParams.get('q') || '';
         if (!query.trim() || /^(trending|trending now|popular|top songs|top hits)$/i.test(query.trim())) {
           res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=3600');
-          return sendJson(res, 200, await trendingIndian());
+          const autoTrending = await trendingIndian();
+          // Admin custom tracks: pinned in the exact custom order set by admin!
+          const custom = (memoryDb.customTracks || []).map(t => ({
+            id: t.id || ('yt_' + t.videoId),
+            videoId: t.videoId,
+            name: t.name || t.title,
+            artist: t.artist || 'AuraMusic Feature',
+            album: t.album || 'Featured Track',
+            duration: Number(t.duration) || 220,
+            image: t.image || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
+            url: `/api/yt/stream?id=${t.videoId}&q=${encodeURIComponent(t.name || '')}`,
+            isCustomPinned: true
+          }));
+          const seenIds = new Set(custom.map(c => c.videoId));
+          const merged = custom.concat(autoTrending.filter(s => !seenIds.has(s.videoId)));
+          return sendJson(res, 200, merged);
         }
 
         // Fast path: Top 10 songs from JioSaavn 320k direct CDN (<250ms response, <1.5s playback)
@@ -1986,6 +2003,101 @@ async function searchYouTube(query) {
             appUpdate: memoryDb.appUpdate
           }
         });
+      }
+
+      // ── Custom Tracks Management APIs (Admin Panel) ──
+      // GET /api/admin/custom-tracks -> fetch all custom pinned tracks
+      if (pathname === '/api/admin/custom-tracks' && req.method === 'GET') {
+        return sendJson(res, 200, { success: true, tracks: memoryDb.customTracks || [] });
+      }
+
+      // POST /api/admin/custom-tracks -> add new track via YouTube link/ID or reorder
+      if (pathname === '/api/admin/custom-tracks' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const action = body.action || 'add';
+
+        if (!memoryDb.customTracks) memoryDb.customTracks = [];
+
+        if (action === 'reorder') {
+          // Reorder array: accepts reordered array of tracks
+          if (Array.isArray(body.tracks)) {
+            memoryDb.customTracks = body.tracks;
+            saveDatabase();
+            return sendJson(res, 200, { success: true, message: 'Tracks reordered successfully', tracks: memoryDb.customTracks });
+          }
+          return sendJson(res, 400, { error: 'Invalid tracks array' });
+        }
+
+        if (action === 'delete') {
+          const videoId = String(body.videoId || '').trim();
+          memoryDb.customTracks = memoryDb.customTracks.filter(t => t.videoId !== videoId);
+          saveDatabase();
+          return sendJson(res, 200, { success: true, message: 'Track removed', tracks: memoryDb.customTracks });
+        }
+
+        // Add track: extract YouTube ID from full URL or bare ID
+        let rawInput = String(body.url || body.videoId || '').trim();
+        let videoId = '';
+
+        // Match standard youtube links: https://youtu.be/ID or https://www.youtube.com/watch?v=ID or /shorts/ID
+        const ytMatch = rawInput.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/i);
+        if (ytMatch && ytMatch[1]) {
+          videoId = ytMatch[1];
+        } else if (/^[\w-]{11}$/.test(rawInput)) {
+          videoId = rawInput;
+        }
+
+        if (!videoId) {
+          return sendJson(res, 400, { error: 'Invalid YouTube link or Video ID. Please provide a valid YouTube URL.' });
+        }
+
+        // Check duplicate
+        if (memoryDb.customTracks.some(t => t.videoId === videoId)) {
+          return sendJson(res, 400, { error: 'This song is already in your custom tracks list.' });
+        }
+
+        // Try to fetch YouTube title/artist metadata automatically if not provided
+        let name = String(body.name || body.title || '').trim();
+        let artist = String(body.artist || '').trim();
+
+        if (!name) {
+          try {
+            const oembed = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+              signal: AbortSignal.timeout(3000)
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+            if (oembed?.title) {
+              name = oembed.title;
+              artist = oembed.author_name || 'YouTube Music';
+            }
+          } catch (_) {}
+        }
+
+        if (!name) name = `Custom Song (${videoId})`;
+        if (!artist) artist = 'AuraMusic Feature';
+
+        const newTrack = {
+          id: 'yt_' + videoId,
+          videoId,
+          name,
+          artist,
+          album: String(body.album || 'Featured').trim(),
+          duration: Number(body.duration) || 240,
+          image: body.image || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          addedAt: new Date().toISOString()
+        };
+
+        const position = parseInt(body.position, 10);
+        if (!isNaN(position) && position >= 0 && position < memoryDb.customTracks.length) {
+          // Insert at specified index
+          memoryDb.customTracks.splice(position, 0, newTrack);
+        } else {
+          // Prepend at top (index 0) by default for new tracks
+          memoryDb.customTracks.unshift(newTrack);
+        }
+
+        saveDatabase();
+        return sendJson(res, 200, { success: true, message: 'Custom track added successfully', track: newTrack, tracks: memoryDb.customTracks });
       }
 
       // ── System Health & Taste Diagnostic Dashboard (Admin Panel API) ──

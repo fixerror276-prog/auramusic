@@ -1173,6 +1173,28 @@
         });
         tabsContainer.appendChild(healthBtn);
       }
+
+      // ── Custom Tracks & Song Order Manager Tab (Admin Panel Button) ──
+      if (!document.getElementById('tab-btn-custom-tracks')) {
+        const customBtn = document.createElement('button');
+        customBtn.id = 'tab-btn-custom-tracks';
+        customBtn.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.04]';
+        customBtn.innerHTML = `
+          <span style="font-size: 14px;">🎛️</span>
+          <span>Custom Tracks Order</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            PIN
+          </span>
+        `;
+        customBtn.addEventListener('click', function() {
+          tabsContainer.querySelectorAll('button').forEach(b => {
+            b.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer text-slate-400 hover:text-white hover:bg-white/[0.04]';
+          });
+          customBtn.className = 'flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer bg-gradient-to-r from-amber-500 to-orange-500 text-black shadow-md shadow-amber-500/20';
+          renderAdminCustomTracksView();
+        });
+        tabsContainer.appendChild(customBtn);
+      }
     }
 
     function renderAdminUpdateView() {
@@ -1564,6 +1586,223 @@
             Failed to connect to /api/admin/taste-health: ${err.message}
           </div>
         `;
+      }
+    }
+
+    // ── Function to render Custom Tracks & Drag/Drop Order View in Admin Dashboard ──
+    async function renderAdminCustomTracksView() {
+      const contentParent = document.querySelector('.max-w-7xl.w-full.mx-auto') || document.querySelector('main');
+      if (!contentParent) return;
+
+      Array.from(contentParent.children).forEach(c => {
+        if (c.id !== 'aura-admin-custom-panel') c.style.display = 'none';
+      });
+
+      let customPanel = document.getElementById('aura-admin-custom-panel');
+      if (!customPanel) {
+        customPanel = document.createElement('div');
+        customPanel.id = 'aura-admin-custom-panel';
+        contentParent.appendChild(customPanel);
+      }
+      customPanel.style.display = 'block';
+
+      customPanel.innerHTML = `
+        <div class="p-6 sm:p-8 bg-slate-900/95 border border-amber-500/40 rounded-3xl shadow-2xl space-y-6 text-slate-100">
+          <!-- Header -->
+          <div class="border-b border-slate-800 pb-4">
+            <div class="flex items-center space-x-3">
+              <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-2xl shadow-lg">🎛️</div>
+              <div>
+                <h3 class="text-xl sm:text-2xl font-bold bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-300 bg-clip-text text-transparent">Custom Tracks & Order Manager</h3>
+                <p class="text-xs text-slate-400">YouTube link dalkar gaana add karo aur arrows (⬆️ ⬇️) se set karo ki kaunsa song kahan bajega!</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add Track Form -->
+          <form id="admin-add-custom-track-form" class="p-5 rounded-2xl bg-black/40 border border-white/10 space-y-4">
+            <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider">➕ Add YouTube Song by Link / URL</h4>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-slate-300 mb-1">YouTube Link or Video ID *</label>
+                <input type="text" id="custom-track-url" required
+                  placeholder="https://www.youtube.com/watch?v=... ya youtu.be/... ya Video ID"
+                  class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Insert Position</label>
+                <select id="custom-track-pos" class="w-full px-3 py-2.5 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400">
+                  <option value="0">Top #1 (Sabse Pehle Bajega)</option>
+                  <option value="-1">Bottom (Sabse Aakhri Me)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Custom Title (Optional - auto detects)</label>
+                <input type="text" id="custom-track-name"
+                  placeholder="Leave empty to auto-fetch from YouTube"
+                  class="w-full px-4 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Artist Name (Optional)</label>
+                <input type="text" id="custom-track-artist"
+                  placeholder="Leave empty to auto-fetch"
+                  class="w-full px-4 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400">
+              </div>
+            </div>
+
+            <button type="submit" id="custom-add-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-xs uppercase tracking-wider hover:brightness-110 active:scale-95 transition shadow-lg shadow-amber-500/20 cursor-pointer">
+              Add Track To Trending & Home
+            </button>
+            <span id="custom-add-msg" class="text-xs ml-3 font-semibold text-emerald-400 opacity-0 transition-opacity"></span>
+          </form>
+
+          <!-- Current Tracks Order List -->
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider">📋 Current Song Sequence (User Home Screen Par Isi Order Me Dikhega)</h4>
+              <span id="custom-track-count" class="text-xs text-amber-400 font-mono">0 Custom Tracks</span>
+            </div>
+            <div id="custom-tracks-list-container" class="space-y-2">
+              <div class="text-xs text-slate-500 py-6 text-center animate-pulse">Loading custom track sequence...</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Load & Render Track list
+      async function loadTracksList() {
+        try {
+          const res = await fetch('/api/admin/custom-tracks');
+          const data = await res.json();
+          const tracks = data.tracks || [];
+          document.getElementById('custom-track-count').textContent = `${tracks.length} Custom Pinned Track(s)`;
+
+          const container = document.getElementById('custom-tracks-list-container');
+          if (!container) return;
+
+          if (!tracks.length) {
+            container.innerHTML = `
+              <div class="p-8 rounded-2xl bg-black/30 border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                Koi custom track add nahi kiya hai. Upar YouTube link daalkar pehla gaana add karo!
+              </div>
+            `;
+            return;
+          }
+
+          container.innerHTML = tracks.map((t, idx) => `
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-black/50 border border-slate-800 hover:border-amber-500/30 transition group">
+              <div class="flex items-center space-x-3.5 min-w-0">
+                <span class="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 font-mono text-xs flex items-center justify-center font-bold">
+                  #${idx + 1}
+                </span>
+                <img src="${t.image || `https://i.ytimg.com/vi/${t.videoId}/default.jpg`}" class="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0" alt="poster">
+                <div class="min-w-0">
+                  <h5 class="text-xs font-bold text-slate-100 truncate">${escapeHtml(t.name)}</h5>
+                  <p class="text-[11px] text-slate-400 truncate">${escapeHtml(t.artist)} • <span class="font-mono text-amber-400/80">ID: ${escapeHtml(t.videoId)}</span></p>
+                </div>
+              </div>
+
+              <!-- Reorder & Action Controls -->
+              <div class="flex items-center space-x-1.5 shrink-0">
+                <button data-action="up" data-idx="${idx}" class="reorder-btn p-2 rounded-lg bg-slate-800/80 hover:bg-amber-500 hover:text-black text-slate-300 transition text-xs font-bold disabled:opacity-30 disabled:pointer-events-none" ${idx === 0 ? 'disabled' : ''} title="Move Up">
+                  ⬆️
+                </button>
+                <button data-action="down" data-idx="${idx}" class="reorder-btn p-2 rounded-lg bg-slate-800/80 hover:bg-amber-500 hover:text-black text-slate-300 transition text-xs font-bold disabled:opacity-30 disabled:pointer-events-none" ${idx === tracks.length - 1 ? 'disabled' : ''} title="Move Down">
+                  ⬇️
+                </button>
+                <button data-action="del" data-id="${t.videoId}" class="delete-track-btn p-2 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition text-xs font-bold ml-2 cursor-pointer" title="Delete Track">
+                  🗑️
+                </button>
+              </div>
+            </div>
+          `).join('');
+
+          // Bind Reorder & Delete actions
+          container.querySelectorAll('.reorder-btn').forEach(btn => {
+            btn.onclick = async function() {
+              const action = this.getAttribute('data-action');
+              const i = parseInt(this.getAttribute('data-idx'), 10);
+              const copy = tracks.slice();
+              if (action === 'up' && i > 0) {
+                [copy[i - 1], copy[i]] = [copy[i], copy[i - 1]];
+              } else if (action === 'down' && i < copy.length - 1) {
+                [copy[i + 1], copy[i]] = [copy[i], copy[i + 1]];
+              }
+              await fetch('/api/admin/custom-tracks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'reorder', tracks: copy })
+              });
+              loadTracksList();
+            };
+          });
+
+          container.querySelectorAll('.delete-track-btn').forEach(btn => {
+            btn.onclick = async function() {
+              const videoId = this.getAttribute('data-id');
+              if (!confirm('Are you sure you want to remove this song from custom list?')) return;
+              await fetch('/api/admin/custom-tracks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'delete', videoId })
+              });
+              loadTracksList();
+            };
+          });
+
+        } catch (e) {
+          console.error('Failed to load custom tracks:', e);
+        }
+      }
+
+      loadTracksList();
+
+      // Form submit: Add new track
+      const addForm = document.getElementById('admin-add-custom-track-form');
+      if (addForm) {
+        addForm.onsubmit = async function(e) {
+          e.preventDefault();
+          const submitBtn = document.getElementById('custom-add-btn');
+          const msg = document.getElementById('custom-add-msg');
+          submitBtn.textContent = 'Adding...';
+
+          const url = document.getElementById('custom-track-url').value.trim();
+          const pos = document.getElementById('custom-track-pos').value;
+          const name = document.getElementById('custom-track-name').value.trim();
+          const artist = document.getElementById('custom-track-artist').value.trim();
+
+          try {
+            const res = await fetch('/api/admin/custom-tracks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'add',
+                url,
+                position: pos === '-1' ? 999999 : parseInt(pos, 10),
+                name,
+                artist
+              })
+            });
+            const data = await res.json();
+            if (data.success) {
+              msg.textContent = '✓ Song added & pinned successfully!';
+              msg.style.opacity = '1';
+              setTimeout(() => { msg.style.opacity = '0'; }, 3000);
+              addForm.reset();
+              loadTracksList();
+            } else {
+              alert(data.error || 'Failed to add song');
+            }
+          } catch (err) {
+            alert('Request failed: ' + err.message);
+          } finally {
+            submitBtn.textContent = 'Add Track To Trending & Home';
+          }
+        };
       }
     }
 
