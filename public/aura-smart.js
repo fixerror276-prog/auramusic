@@ -2151,12 +2151,195 @@
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // F. TASTE DNA & PERSONAL MUSIC DASHBOARD MODAL
+    // ────────────────────────────────────────────────────────────────────────
+    window.auraShowTasteDashboard = async function() {
+      const u = getUser();
+      const uid = (u && u.email) ? u.email : (u && u.id ? u.id : 'guest');
+      if (uid === 'guest') {
+        toast('Please login to view your personal Taste DNA & Stats', 'error');
+        return;
+      }
+
+      // Check if modal already exists
+      let modal = document.getElementById('aura-taste-modal');
+      if (modal) modal.remove();
+
+      modal = document.createElement('div');
+      modal.id = 'aura-taste-modal';
+      modal.className = 'fixed inset-0 z-[999999] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto';
+      modal.innerHTML = `
+        <div class="relative w-full max-w-xl bg-[#0e1017] border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+          <button id="aura-close-taste-btn" class="absolute top-5 right-5 text-slate-400 hover:text-white p-2 rounded-full hover:bg-white/10 transition">✕</button>
+          <div class="flex items-center space-x-3 mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-2xl shadow-lg">🧬</div>
+            <div>
+              <h2 class="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-amber-300 bg-clip-text text-transparent">Your Music Taste DNA</h2>
+              <p class="text-xs sm:text-sm text-slate-400">AI-analyzed music taste, stats & listening habits</p>
+            </div>
+          </div>
+          <div id="aura-taste-content" class="space-y-6">
+            <div class="flex items-center justify-center py-12 text-slate-400 animate-pulse text-sm">
+              Analyzing your music taste & listening habits...
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      document.getElementById('aura-close-taste-btn').onclick = () => modal.remove();
+      modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+      try {
+        const res = await fetch(`/api/taste/dashboard?userId=${encodeURIComponent(uid)}`);
+        const data = await res.json();
+        const d = data.dashboard || {};
+        const stats = d.stats || {};
+        const dna = d.tasteDNA || [];
+        const persona = d.dnaCard?.persona || 'The Music Explorer 🌍';
+        const topArtists = d.favouriteArtists || [];
+
+        const content = document.getElementById('aura-taste-content');
+        if (!content) return;
+
+        content.innerHTML = `
+          <!-- Persona Card -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-purple-900/40 to-pink-900/30 border border-purple-500/30 flex items-center justify-between">
+            <div>
+              <span class="text-xs uppercase tracking-wider text-purple-300 font-semibold">Current Persona</span>
+              <h3 class="text-lg sm:text-xl font-bold text-white mt-0.5">${persona}</h3>
+              <p class="text-xs text-slate-300 mt-1">Learns dynamically as you play, like & skip songs</p>
+            </div>
+            <div class="text-3xl">✨</div>
+          </div>
+
+          <!-- Listening Minutes Stats -->
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span class="text-xs text-slate-400">Total Listened</span>
+              <p class="text-lg sm:text-xl font-bold text-amber-400 mt-1">${stats.totalListeningMinutes || 0}m</p>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span class="text-xs text-slate-400">Today</span>
+              <p class="text-lg sm:text-xl font-bold text-emerald-400 mt-1">${stats.todayMinutes || 0}m</p>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span class="text-xs text-slate-400">Plays</span>
+              <p class="text-lg sm:text-xl font-bold text-cyan-400 mt-1">${stats.totalPlaysRecorded || 0}</p>
+            </div>
+          </div>
+
+          <!-- Mood Breakdown (DNA) -->
+          <div>
+            <h4 class="text-sm font-semibold text-slate-200 mb-3 flex items-center justify-between">
+              <span>Mood & Vibe Percentages</span>
+              <span class="text-xs text-purple-400 font-normal">Real-time</span>
+            </h4>
+            <div class="space-y-2">
+              ${dna.length ? dna.map(m => `
+                <div>
+                  <div class="flex justify-between text-xs mb-1">
+                    <span class="text-slate-300">${m.name}</span>
+                    <span class="text-purple-300 font-semibold">${m.percent}%</span>
+                  </div>
+                  <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full" style="width: ${m.percent}%"></div>
+                  </div>
+                </div>
+              `).join('') : '<p class="text-xs text-slate-500">Play a few songs to calculate your mood percentages.</p>'}
+            </div>
+          </div>
+
+          <!-- Top Artists -->
+          ${topArtists.length ? `
+            <div>
+              <h4 class="text-sm font-semibold text-slate-200 mb-2">Most Listened Artists</h4>
+              <div class="flex flex-wrap gap-2">
+                ${topArtists.slice(0, 5).map(a => `
+                  <span class="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 border border-slate-700 text-slate-200">
+                    🎤 ${a.name}
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Auto Playlists Quick Launcher -->
+          <div class="pt-2">
+            <button id="aura-generate-playlists-btn" class="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 text-white font-semibold text-sm shadow-lg hover:brightness-110 active:scale-[0.98] transition">
+              ✨ Sync 12 Personalized Auto-Playlists
+            </button>
+          </div>
+
+          <!-- Privacy Option -->
+          <div class="text-center pt-2">
+            <button id="aura-clear-taste-btn" class="text-xs text-slate-500 hover:text-red-400 transition underline">
+              Reset My Music Taste History
+            </button>
+          </div>
+        `;
+
+        document.getElementById('aura-generate-playlists-btn').onclick = async function() {
+          this.textContent = 'Generating...';
+          try {
+            const r = await fetch(`/api/taste/auto-playlists?userId=${encodeURIComponent(uid)}`);
+            const j = await r.json();
+            if (j.success) {
+              toast('12 Auto-Playlists created in your Library! ✨');
+              modal.remove();
+            }
+          } catch {
+            toast('Failed to generate playlists', 'error');
+            this.textContent = '✨ Sync 12 Personalized Auto-Playlists';
+          }
+        };
+
+        document.getElementById('aura-clear-taste-btn').onclick = async function() {
+          if (!confirm('Are you sure you want to clear your listening history & taste profile?')) return;
+          try {
+            await fetch('/api/taste/clear-history', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: uid, deleteEntireProfile: false })
+            });
+            toast('Music history reset successfully');
+            modal.remove();
+          } catch {
+            toast('Failed to reset history', 'error');
+          }
+        };
+
+      } catch (err) {
+        console.error('Error fetching taste dashboard:', err);
+        const content = document.getElementById('aura-taste-content');
+        if (content) content.innerHTML = '<p class="text-xs text-red-400 py-6 text-center">Failed to load taste profile. Please try again.</p>';
+      }
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // G. INJECT TASTE DNA BUTTON INTO HEADER
+    // ────────────────────────────────────────────────────────────────────────
+    function injectTasteHeaderButton() {
+      const headerActions = document.querySelector('header div[class*="flex items-center space-x"], header div[class*="flex items-center gap"]');
+      if (headerActions && !document.getElementById('aura-header-dna-btn')) {
+        const dnaBtn = document.createElement('button');
+        dnaBtn.id = 'aura-header-dna-btn';
+        dnaBtn.title = 'View Music Taste DNA & Personalized Analytics';
+        dnaBtn.className = 'px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600 hover:to-pink-600 border border-purple-500/40 text-purple-200 hover:text-white transition-all flex items-center space-x-1.5 shadow-sm';
+        dnaBtn.innerHTML = `<span>🧬</span><span class="hidden sm:inline">Taste DNA</span>`;
+        dnaBtn.onclick = () => window.auraShowTasteDashboard();
+        headerActions.insertBefore(dnaBtn, headerActions.firstChild);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Continuous DOM Observer
     // ────────────────────────────────────────────────────────────────────────
     const mainObserver = new MutationObserver(() => {
       enhanceVibeRadarCards();
       configureHeaderDownloadBtn();
       injectDownloadButtons();
+      injectTasteHeaderButton();
     });
     mainObserver.observe(document.documentElement, { childList: true, subtree: true });
 
@@ -2164,5 +2347,6 @@
       enhanceVibeRadarCards();
       configureHeaderDownloadBtn();
       injectDownloadButtons();
+      injectTasteHeaderButton();
     });
   })();
