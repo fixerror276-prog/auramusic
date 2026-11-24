@@ -185,7 +185,7 @@ export function recordTaste(db, body) {
     return true;
   }
 
-  if (videoId.length !== 11) return false;  // non-YT songs ignored for now
+  if (!videoId) return false;
 
   const name    = String(song.name   || '').slice(0, 200);
   const artist  = String(song.artist || '').slice(0, 120);
@@ -281,6 +281,16 @@ export function recordTaste(db, body) {
     aKeys.sort((x, y) => t.artists[x].score - t.artists[y].score)
          .slice(0, aKeys.length - MAX_ARTISTS)
          .forEach(k => delete t.artists[k]);
+  }
+
+  // ── 9. INSTANT TASTE LEARNER (10-Minute Adaptation) ────────────
+  // Nightly job ka intezar kiye bina, har 2-3 events ya first session mein
+  // Taste DNA turant rebuild hota hai taaki queue 10 minute me adapt ho jaye!
+  const eventCount = (t.events || []).length;
+  if (eventCount <= 5 || eventCount % 2 === 0 || t._moodShift) {
+    try {
+      buildDNA(db, userId);
+    } catch (_) {}
   }
 
   return true;
@@ -579,11 +589,16 @@ function tasteSeeds(db, userId) {
   if (profile) {
     const now = Date.now();
     for (const [id, s] of Object.entries(profile.songs)) {
-      const days    = (now - s.last) / 86400000;
+      const minutesAgo = (now - (s.last || now)) / 60000;
+      // Ultra-fresh boost: songs played in the last 15 minutes get a 4x immediate weight
+      // so the system learns within 10 minutes of listening!
+      const instantBoost = minutesAgo <= 15 ? 4.0 : minutesAgo <= 120 ? 2.5 : 1.0;
+      const days = (now - s.last) / 86400000;
       const recency = days < 2 ? 1.5 : days < 14 ? 1 : 0.5;
-      add(id, ((s.plays || 0) + 3 * (s.likes || 0) + 5 * (s.replays || 0)
+
+      add(id, (((s.plays || 0) + 3 * (s.likes || 0) + 5 * (s.replays || 0)
                - 2 * (s.skips || 0) - 3 * (s.dislikes || 0)) * recency
-              + (s.depthScore || 0) * 0.2);
+              + (s.depthScore || 0) * 0.3) * instantBoost);
     }
   }
   return seeds;
