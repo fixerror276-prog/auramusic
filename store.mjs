@@ -94,7 +94,30 @@ async function neonInit() {
           created_at timestamptz DEFAULT now()
         )`
       ).catch(() => {});
-      // 4. User Taste Profiles & DNA Table (Structured relational profile)
+      // 4. User Likes Table (User favorite songs matching Neon schema)
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_likes (
+          user_id varchar(255) NOT NULL,
+          song_id varchar(255) NOT NULL,
+          song_data jsonb NOT NULL,
+          created_at timestamptz DEFAULT now(),
+          PRIMARY KEY (user_id, song_id)
+        )`
+      ).catch(() => {});
+      // 5. User Playlists Table
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_playlists (
+          id varchar(255) PRIMARY KEY,
+          user_id varchar(255) NOT NULL,
+          name varchar(255) NOT NULL,
+          description text,
+          songs jsonb DEFAULT '[]'::jsonb,
+          is_system boolean DEFAULT false,
+          created_at timestamptz DEFAULT now(),
+          updated_at timestamptz DEFAULT now()
+        )`
+      ).catch(() => {});
+      // 6. User Taste Profiles & DNA Table (Structured relational profile)
       await neonQuery(
         `CREATE TABLE IF NOT EXISTS user_taste_profiles (
           user_id text PRIMARY KEY,
@@ -109,13 +132,136 @@ async function neonInit() {
           last_updated timestamptz DEFAULT now()
         )`
       ).catch(() => {});
-      // 5. Index for fast querying user events
+      // 7. Indexes
       await neonQuery(
         'CREATE INDEX IF NOT EXISTS idx_listening_user_created ON user_listening_events (user_id, created_at DESC)'
+      ).catch(() => {});
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_playlists_user ON user_playlists (user_id)'
       ).catch(() => {});
     })().catch(e => { neonReady = null; throw e; });
   }
   return neonReady;
+}
+
+// ── Sync individual like directly into Neon 'user_likes' table ──
+export async function syncLikeToNeon(userId, song, isLiked = true) {
+  if (!useNeon || !userId || !song) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const songId = String(song.id || song.videoId || '').trim();
+    if (!songId) return;
+
+    if (isLiked) {
+      await neonQuery(
+        `INSERT INTO user_likes (user_id, song_id, song_data, created_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (user_id, song_id) DO UPDATE SET song_data = EXCLUDED.song_data, created_at = now()`,
+        [uid, songId, JSON.stringify(song)]
+      );
+    } else {
+      await neonQuery(
+        `DELETE FROM user_likes WHERE user_id = $1 AND song_id = $2`,
+        [uid, songId]
+      );
+    }
+  } catch (err) {
+    console.warn('[NEON] user_likes table sync notice:', err.message);
+  }
+}
+
+// ── Sync playlist directly into Neon 'user_playlists' table ──
+export async function syncPlaylistToNeon(userId, playlist) {
+  if (!useNeon || !userId || !playlist) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const plId = String(playlist.id || playlist._id || `pl_${Date.now()}`);
+    const name = String(playlist.name || 'My Playlist');
+    const desc = String(playlist.description || '');
+    const songsJson = JSON.stringify(playlist.songs || []);
+    const isSys = Boolean(playlist.isSystem || playlist._system);
+
+    await neonQuery(
+      `INSERT INTO user_playlists (id, user_id, name, description, songs, is_system, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, songs = EXCLUDED.songs, updated_at = now()`,
+      [plId, uid, name, desc, songsJson, isSys]
+    );
+  } catch (err) {
+    console.warn('[NEON] user_playlists table sync notice:', err.message);
+  }
+}
+
+// ── Delete playlist from Neon ──
+export async function deletePlaylistFromNeon(playlistId) {
+  if (!useNeon || !playlistId) return;
+  try {
+    await neonInit();
+    await neonQuery('DELETE FROM user_playlists WHERE id = $1', [String(playlistId)]);
+  } catch (err) {
+    console.warn('[NEON] delete playlist notice:', err.message);
+  }
+}
+
+// ── Sync listening event into Neon 'user_listening_events' table ──
+export async function syncListeningEventToNeon(userId, event) {
+  if (!useNeon || !userId || !event) return;
+  try {
+    await neonInit();
+    const id = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const uid = String(userId).toLowerCase().trim();
+    const songId = String(event.song?.videoId || event.song?.id || event.videoId || 'unknown');
+    const eventType = String(event.type || 'play');
+    const listenedSec = Number(event.listenedSec) || 0;
+    const depthScore = Number(event.depth) || 0;
+    const contextKey = String(event.ctx || event.contextKey || 'any');
+
+    await neonQuery(
+      `INSERT INTO user_listening_events (id, user_id, song_id, event_type, listened_sec, depth_score, context_key, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+      [id, uid, songId, eventType, listenedSec, depthScore, contextKey]
+    );
+  } catch (err) {
+    console.warn('[NEON] user_listening_events sync notice:', err.message);
+  }
+}
+
+// ── Sync taste profile DNA into Neon 'user_taste_profiles' table ──
+export async function syncTasteProfileToNeon(userId, profile) {
+  if (!useNeon || !userId || !profile) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const dna = profile.dnaCard || {};
+    const persona = String(dna.persona || 'The Music Explorer 🌍');
+    const topMoods = JSON.stringify(dna.topMoods || []);
+    const topGenres = JSON.stringify(dna.topGenres || []);
+    const topArtists = JSON.stringify(dna.topArtists || []);
+    const tagWeights = JSON.stringify(profile.tagWeights || {});
+    const contextual = JSON.stringify(profile.contexts || {});
+    const volatility = String(dna.volatility?.label || 'STABLE_LOYALIST');
+    const milestones = JSON.stringify(profile.milestones || []);
+
+    await neonQuery(
+      `INSERT INTO user_taste_profiles (user_id, persona, top_moods, top_genres, top_artists, tag_weights, contextual_taste, volatility_type, milestones, last_updated)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         persona = EXCLUDED.persona,
+         top_moods = EXCLUDED.top_moods,
+         top_genres = EXCLUDED.top_genres,
+         top_artists = EXCLUDED.top_artists,
+         tag_weights = EXCLUDED.tag_weights,
+         contextual_taste = EXCLUDED.contextual_taste,
+         volatility_type = EXCLUDED.volatility_type,
+         milestones = EXCLUDED.milestones,
+         last_updated = now()`,
+      [uid, persona, topMoods, topGenres, topArtists, tagWeights, contextual, volatility, milestones]
+    );
+  } catch (err) {
+    console.warn('[NEON] user_taste_profiles sync notice:', err.message);
+  }
 }
 
 // ── Sync user directly into Neon Postgres 'users' table ──

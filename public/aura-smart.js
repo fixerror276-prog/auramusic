@@ -333,20 +333,60 @@
     backdrop.innerHTML = `
       <div id="aura-atp-modal">
         <h3>➕ Add to Playlist</h3>
-        ${userPlaylists.length === 0
-          ? '<div class="aura-atp-playlist-item" style="color:#64748b">No playlists yet. Create one first.</div>'
-          : userPlaylists.map(pl => `
-            <div class="aura-atp-playlist-item" data-plid="${escHtml(String(pl.id || pl._id))}" data-plname="${escHtml(pl.name || '')}">
-              <span class="aura-atp-playlist-icon">${pl._system === 'favorites' ? '❤️' : pl.isSystem ? '🕐' : '🎵'}</span>
-              <span>${escHtml(pl.name || 'Playlist')}</span>
-              <span class="aura-atp-playlist-count">${(pl.songs || []).length} songs</span>
-            </div>`).join('')
-        }
+        <div id="aura-atp-create-quick" style="display:flex; gap:8px; padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <input type="text" id="aura-new-pl-input" placeholder="Create new playlist..." style="flex:1; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px; color:#fff; font-size:13px; outline:none;" />
+          <button id="aura-new-pl-submit" style="background:#10b981; color:#000; font-weight:700; border:none; border-radius:10px; padding:8px 14px; font-size:12px; cursor:pointer;">Create</button>
+        </div>
+        <div id="aura-atp-list-items" style="max-height:260px; overflow-y:auto;">
+          ${userPlaylists.length === 0
+            ? '<div class="aura-atp-playlist-item" style="color:#64748b">No custom playlists yet. Create one above!</div>'
+            : userPlaylists.map(pl => `
+              <div class="aura-atp-playlist-item" data-plid="${escHtml(String(pl.id || pl._id))}" data-plname="${escHtml(pl.name || '')}">
+                <span class="aura-atp-playlist-icon">${pl._system === 'favorites' ? '❤️' : pl.isSystem ? '🕐' : '🎵'}</span>
+                <span>${escHtml(pl.name || 'Playlist')}</span>
+                <span class="aura-atp-playlist-count">${(pl.songs || []).length} songs</span>
+              </div>`).join('')
+          }
+        </div>
         <button id="aura-atp-close">Cancel</button>
       </div>
     `;
     document.body.appendChild(backdrop);
     atpModal = backdrop;
+
+    // Instant playlist creation from inside modal
+    const quickInput = document.getElementById('aura-new-pl-input');
+    const quickSubmit = document.getElementById('aura-new-pl-submit');
+    if (quickSubmit && quickInput) {
+      quickSubmit.onclick = async () => {
+        const name = quickInput.value.trim();
+        if (!name) return;
+        quickSubmit.textContent = '...';
+        try {
+          const r = await fetch('/api/playlists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: uid, name })
+          });
+          const j = await r.json();
+          if (j.success && j.playlist) {
+            toast('✅ Playlist created instantly!');
+            // Add current song immediately to new playlist
+            if (atpSong) {
+              await addSongToPlaylist(j.playlist.id, atpSong);
+            }
+            backdrop.remove();
+            atpModal = null;
+          } else {
+            toast(j.error || 'Duplicate playlist name', 'error');
+            quickSubmit.textContent = 'Create';
+          }
+        } catch {
+          toast('Failed to create playlist', 'error');
+          quickSubmit.textContent = 'Create';
+        }
+      };
+    }
 
     backdrop.addEventListener('click', function(e) {
       const item = e.target.closest('.aura-atp-playlist-item');
@@ -540,6 +580,24 @@
       if (song) openAddToPlaylist(song);
     }
   });
+
+  // ── 10B. Like / Heart Click Interceptor: Ask which playlist to add to ──────
+  document.addEventListener('click', function(e) {
+    const target = e.target;
+    // Check if clicked element or its parent is a like button or heart icon
+    const likeBtn = target.closest('button[title*="Like" i], button[title*="Favorite" i], button[aria-label*="Like" i], [class*="heart"], button svg path[d*="19 14"], button svg path[d*="20.84"]')?.closest('button') || target.closest('.like-btn, [class*="like"]');
+    
+    // Ignore internal modal buttons or taste buttons
+    if (likeBtn && !likeBtn.closest('#aura-atp-modal') && !likeBtn.closest('#aura-taste-modal')) {
+      const song = getSongFromContext(likeBtn) || getCurrentSong();
+      if (song && (song.name || song.title)) {
+        // Also show Add To Playlist popup so user can choose custom playlist along with favorites!
+        setTimeout(() => {
+          openAddToPlaylist(song);
+        }, 150);
+      }
+    }
+  }, true);
 
   // ── 12. Fast Music Playing Feature (saavn.dev API with Piped fallback) ────
   // Requirements:

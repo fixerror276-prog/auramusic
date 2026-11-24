@@ -8,7 +8,7 @@ const ytAudioClient = new Ytdl({
   clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded]
 });
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
-import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon } from './store.mjs';
+import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
@@ -1051,8 +1051,10 @@ async function searchYouTube(query) {
       if (pathname === '/api/yt/search') {
         const query = parsedUrl.searchParams.get('q') || '';
         if (!query.trim() || /^(trending|trending now|popular|top songs|top hits)$/i.test(query.trim())) {
-          res.setHeader('Cache-Control', 'public, max-age=600, stale-while-revalidate=3600');
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate'); // Never stale-cache home trending!
+          const userId = parsedUrl.searchParams.get('userId') || 'guest';
           const autoTrending = await trendingIndian();
+
           // Admin custom tracks: pinned in the exact custom order set by admin!
           const custom = (memoryDb.customTracks || []).map(t => ({
             id: t.id || ('yt_' + t.videoId),
@@ -1065,9 +1067,49 @@ async function searchYouTube(query) {
             url: `/api/yt/stream?id=${t.videoId}&q=${encodeURIComponent(t.name || '')}`,
             isCustomPinned: true
           }));
+
+          // Dynamic Personalization on App Reopen:
+          // User ke favorite artists ya recent taste ke songs ko trending pool mein blend karo
+          const userProfile = memoryDb.taste?.[userId];
+          const topFavArtists = Object.entries(userProfile?.artists || {})
+            .filter(([, a]) => a.score > 0)
+            .sort((a, b) => b[1].score - a[1].score)
+            .slice(0, 3)
+            .map(([k, a]) => a.name || k);
+
+          let personalizedPool = [];
+          if (topFavArtists.length > 0) {
+            // Dynamic rotation based on current minute so every reopen gives a fresh mix!
+            const artistPick = topFavArtists[Math.floor(Date.now() / 60000) % topFavArtists.length];
+            personalizedPool = await searchYTCached(`${artistPick} hit songs`, 1500).catch(() => []);
+          }
+
           const seenIds = new Set(custom.map(c => c.videoId));
-          const merged = custom.concat(autoTrending.filter(s => !seenIds.has(s.videoId)));
-          return sendJson(res, 200, merged);
+          // Shuffle remaining trending list dynamically so user sees a fresh sequence on every reopen
+          const shuffledTrending = autoTrending.filter(s => !seenIds.has(s.videoId)).slice();
+          // Fisher-Yates light shuffle (offset by timestamp)
+          for (let i = shuffledTrending.length - 1; i > 0; i--) {
+            const j = (Math.floor(Date.now() / 1000) + i) % (i + 1);
+            [shuffledTrending[i], shuffledTrending[j]] = [shuffledTrending[j], shuffledTrending[i]];
+          }
+
+          // Merge: Custom pinned tracks FIRST, then user's personalized favorites, then fresh trending rotation
+          const finalMerged = [];
+          custom.forEach(c => { seenIds.add(c.videoId); finalMerged.push(c); });
+          personalizedPool.forEach(p => {
+            if (p?.videoId && !seenIds.has(p.videoId)) {
+              seenIds.add(p.videoId);
+              finalMerged.push(p);
+            }
+          });
+          shuffledTrending.forEach(s => {
+            if (s?.videoId && !seenIds.has(s.videoId)) {
+              seenIds.add(s.videoId);
+              finalMerged.push(s);
+            }
+          });
+
+          return sendJson(res, 200, finalMerged);
         }
 
         // Fast path: Top 10 songs from JioSaavn 320k direct CDN (<250ms response, <1.5s playback)
@@ -1581,6 +1623,13 @@ async function searchYouTube(query) {
         if (req.method === 'POST') {
           const body = plBody;
           const name = (body.name || '').trim() || 'My Playlist';
+
+          // Prevent duplicate playlist names for the same user
+          const duplicate = memoryDb.playlists[userId].some(p => (p.name || '').trim().toLowerCase() === name.toLowerCase());
+          if (duplicate) {
+            return sendJson(res, 400, { success: false, error: 'A playlist with this name already exists. Please choose a different name.' });
+          }
+
           const newPlaylist = {
             id: `pl_${Date.now()}`,
             name: name,
@@ -1590,6 +1639,7 @@ async function searchYouTube(query) {
           };
           memoryDb.playlists[userId].unshift(newPlaylist);
           saveDatabase();
+          syncPlaylistToNeon(userId, newPlaylist).catch(() => {});
           console.log(`✅ [PLAYLIST CREATED] "${name}" for user ${userId}`);
           return sendJson(res, 200, { success: true, playlist: newPlaylist });
         }
@@ -1612,6 +1662,7 @@ async function searchYouTube(query) {
             if (!exists) {
               pl.songs.unshift(song);
               saveDatabase();
+              syncPlaylistToNeon(userId, pl).catch(() => {});
             }
             return sendJson(res, 200, { success: true, alreadyInPlaylist: exists, playlist: pl });
           }
@@ -1620,6 +1671,7 @@ async function searchYouTube(query) {
             const sid = String(body.songId);
             pl.songs = pl.songs.filter(s => String(s.id || s.videoId) !== sid);
             saveDatabase();
+            syncPlaylistToNeon(userId, pl).catch(() => {});
             return sendJson(res, 200, { success: true, playlist: pl });
           }
 
@@ -1631,12 +1683,15 @@ async function searchYouTube(query) {
           const plId = parsedUrl.searchParams.get('id');
           const plName = (parsedUrl.searchParams.get('name') || '').trim().toLowerCase();
 
-          memoryDb.playlists[userId] = memoryDb.playlists[userId].filter(p => {
+          const toDelete = memoryDb.playlists[userId].filter(p => {
             const matchesId = plId && String(p.id || p._id) === String(plId);
             const matchesName = plName && String(p.name || '').trim().toLowerCase() === plName;
-            return !(matchesId || matchesName);
+            return matchesId || matchesName;
           });
+
+          memoryDb.playlists[userId] = memoryDb.playlists[userId].filter(p => !toDelete.includes(p));
           saveDatabase();
+          toDelete.forEach(p => deletePlaylistFromNeon(p.id || p._id).catch(() => {}));
           return sendJson(res, 200, { success: true, message: 'Playlist deleted successfully' });
         }
       }
@@ -1673,10 +1728,15 @@ async function searchYouTube(query) {
       if (pathname === '/api/taste/event' && req.method === 'POST') {
         const body = await parseBody(req);
         const recorded = recordTaste(memoryDb, body);
+        const userId = String(body?.userId || '').slice(0, 80);
         if (recorded) {
           saveDatabase();
+          // Real-time synchronization to Neon Postgres
+          syncListeningEventToNeon(userId, body).catch(() => {});
+          if (memoryDb.taste?.[userId]) {
+            syncTasteProfileToNeon(userId, memoryDb.taste[userId]).catch(() => {});
+          }
         }
-        const userId = String(body?.userId || '').slice(0, 80);
         const moodShift = Boolean(memoryDb.taste?.[userId]?._moodShift);
         return sendJson(res, 200, {
           success: true,
@@ -1814,10 +1874,12 @@ async function searchYouTube(query) {
               // Already liked -> Toggle OFF (Remove from favorites)
               memoryDb.likes[userId].splice(existingIndex, 1);
               isLiked = false;
+              syncLikeToNeon(userId, song, false).catch(() => {});
             } else {
               // Not liked -> Add to favorites
               memoryDb.likes[userId].unshift(song);
               isLiked = true;
+              syncLikeToNeon(userId, song, true).catch(() => {});
             }
             saveDatabase();
 
@@ -1838,6 +1900,7 @@ async function searchYouTube(query) {
             }
             favPl.songs = memoryDb.likes[userId].slice();
             saveDatabase();
+            syncPlaylistToNeon(userId, favPl).catch(() => {});
           }
 
           return sendJson(res, 200, {
