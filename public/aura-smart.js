@@ -1173,9 +1173,6 @@
         });
         tabsContainer.appendChild(healthBtn);
       }
-      });
-
-      tabsContainer.appendChild(btn);
     }
 
     function renderAdminUpdateView() {
