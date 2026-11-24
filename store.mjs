@@ -139,6 +139,71 @@ async function neonInit() {
       await neonQuery(
         'CREATE INDEX IF NOT EXISTS idx_playlists_user ON user_playlists (user_id)'
       ).catch(() => {});
+      // 8. User Profiles Table (Community Identity & Bio)
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_profiles (
+          user_id varchar(255) PRIMARY KEY,
+          username varchar(100) UNIQUE,
+          display_name varchar(255),
+          bio text DEFAULT '',
+          avatar_url text DEFAULT '',
+          created_at timestamptz DEFAULT now(),
+          updated_at timestamptz DEFAULT now()
+        )`
+      ).catch(() => {});
+      // Ensure visibility & cover columns exist on user_playlists (Default: private)
+      await neonQuery(
+        `ALTER TABLE user_playlists ADD COLUMN IF NOT EXISTS visibility varchar(50) DEFAULT 'private'`
+      ).catch(() => {});
+      await neonQuery(
+        `ALTER TABLE user_playlists ADD COLUMN IF NOT EXISTS cover_url text DEFAULT ''`
+      ).catch(() => {});
+      await neonQuery(
+        `ALTER TABLE user_playlists ADD COLUMN IF NOT EXISTS likes_count integer DEFAULT 0`
+      ).catch(() => {});
+      // 9. Community Playlist Likes Table
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS playlist_likes (
+          user_id varchar(255) NOT NULL,
+          playlist_id varchar(255) NOT NULL,
+          created_at timestamptz DEFAULT now(),
+          PRIMARY KEY (user_id, playlist_id)
+        )`
+      ).catch(() => {});
+      // 10. Saved Community Playlists (Library Bookmarks)
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS saved_playlists (
+          user_id varchar(255) NOT NULL,
+          playlist_id varchar(255) NOT NULL,
+          created_at timestamptz DEFAULT now(),
+          PRIMARY KEY (user_id, playlist_id)
+        )`
+      ).catch(() => {});
+      // 11. User Follow Relationships
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_follows (
+          follower_id varchar(255) NOT NULL,
+          following_id varchar(255) NOT NULL,
+          created_at timestamptz DEFAULT now(),
+          PRIMARY KEY (follower_id, following_id)
+        )`
+      ).catch(() => {});
+      // 12. Community Performance Indexes
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_playlists_visibility ON user_playlists (visibility, created_at DESC)'
+      ).catch(() => {});
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_playlist_likes_pid ON playlist_likes (playlist_id)'
+      ).catch(() => {});
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_saved_playlists_uid ON saved_playlists (user_id)'
+      ).catch(() => {});
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_user_follows_following ON user_follows (following_id)'
+      ).catch(() => {});
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows (follower_id)'
+      ).catch(() => {});
     })().catch(e => { neonReady = null; throw e; });
   }
   return neonReady;
@@ -182,15 +247,129 @@ export async function syncPlaylistToNeon(userId, playlist) {
     const desc = String(playlist.description || '');
     const songsJson = JSON.stringify(playlist.songs || []);
     const isSys = Boolean(playlist.isSystem || playlist._system);
+    const visibility = String(playlist.visibility || 'private');
+    const coverUrl = String(playlist.coverUrl || '');
+    const likesCount = Number(playlist.likesCount || 0);
 
     await neonQuery(
-      `INSERT INTO user_playlists (id, user_id, name, description, songs, is_system, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, songs = EXCLUDED.songs, updated_at = now()`,
-      [plId, uid, name, desc, songsJson, isSys]
+      `INSERT INTO user_playlists (id, user_id, name, description, songs, is_system, visibility, cover_url, likes_count, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       ON CONFLICT (id) DO UPDATE SET 
+         name = EXCLUDED.name, 
+         description = EXCLUDED.description, 
+         songs = EXCLUDED.songs,
+         visibility = EXCLUDED.visibility,
+         cover_url = EXCLUDED.cover_url,
+         likes_count = EXCLUDED.likes_count,
+         updated_at = now()`,
+      [plId, uid, name, desc, songsJson, isSys, visibility, coverUrl, likesCount]
     );
   } catch (err) {
     console.warn('[NEON] user_playlists table sync notice:', err.message);
+  }
+}
+
+// ── Sync user profile into Neon 'user_profiles' table ──
+export async function syncProfileToNeon(userId, profile) {
+  if (!useNeon || !userId || !profile) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const username = profile.username ? String(profile.username).toLowerCase().trim() : null;
+    const displayName = String(profile.displayName || profile.name || '');
+    const bio = String(profile.bio || '');
+    const avatarUrl = String(profile.avatarUrl || profile.avatar || '');
+
+    await neonQuery(
+      `INSERT INTO user_profiles (user_id, username, display_name, bio, avatar_url, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         username = COALESCE(EXCLUDED.username, user_profiles.username),
+         display_name = EXCLUDED.display_name,
+         bio = EXCLUDED.bio,
+         avatar_url = EXCLUDED.avatar_url,
+         updated_at = now()`,
+      [uid, username, displayName, bio, avatarUrl]
+    );
+  } catch (err) {
+    console.warn('[NEON] user_profiles sync notice:', err.message);
+  }
+}
+
+// ── Sync playlist like into Neon 'playlist_likes' table ──
+export async function syncPlaylistLikeToNeon(userId, playlistId, isLiked = true) {
+  if (!useNeon || !userId || !playlistId) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const pid = String(playlistId).trim();
+    if (isLiked) {
+      await neonQuery(
+        `INSERT INTO playlist_likes (user_id, playlist_id, created_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (user_id, playlist_id) DO NOTHING`,
+        [uid, pid]
+      );
+    } else {
+      await neonQuery(
+        `DELETE FROM playlist_likes WHERE user_id = $1 AND playlist_id = $2`,
+        [uid, pid]
+      );
+    }
+  } catch (err) {
+    console.warn('[NEON] playlist_likes sync notice:', err.message);
+  }
+}
+
+// ── Sync saved playlist bookmark into Neon 'saved_playlists' table ──
+export async function syncSavedPlaylistToNeon(userId, playlistId, isSaved = true) {
+  if (!useNeon || !userId || !playlistId) return;
+  try {
+    await neonInit();
+    const uid = String(userId).toLowerCase().trim();
+    const pid = String(playlistId).trim();
+    if (isSaved) {
+      await neonQuery(
+        `INSERT INTO saved_playlists (user_id, playlist_id, created_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (user_id, playlist_id) DO NOTHING`,
+        [uid, pid]
+      );
+    } else {
+      await neonQuery(
+        `DELETE FROM saved_playlists WHERE user_id = $1 AND playlist_id = $2`,
+        [uid, pid]
+      );
+    }
+  } catch (err) {
+    console.warn('[NEON] saved_playlists sync notice:', err.message);
+  }
+}
+
+// ── Sync user follow relationship into Neon 'user_follows' table ──
+export async function syncUserFollowToNeon(followerId, followingId, isFollowing = true) {
+  if (!useNeon || !followerId || !followingId) return;
+  try {
+    await neonInit();
+    const fId = String(followerId).toLowerCase().trim();
+    const targetId = String(followingId).toLowerCase().trim();
+    if (fId === targetId) return;
+
+    if (isFollowing) {
+      await neonQuery(
+        `INSERT INTO user_follows (follower_id, following_id, created_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (follower_id, following_id) DO NOTHING`,
+        [fId, targetId]
+      );
+    } else {
+      await neonQuery(
+        `DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2`,
+        [fId, targetId]
+      );
+    }
+  } catch (err) {
+    console.warn('[NEON] user_follows sync notice:', err.message);
   }
 }
 

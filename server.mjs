@@ -8,7 +8,7 @@ const ytAudioClient = new Ytdl({
   clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded]
 });
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
-import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon } from './store.mjs';
+import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon, syncProfileToNeon, syncPlaylistLikeToNeon, syncSavedPlaylistToNeon, syncUserFollowToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
@@ -106,7 +106,11 @@ function saveDatabase() {
       userTastes: memoryDb.userTastes,
       taste: memoryDb.taste,
       customTracks: memoryDb.customTracks,
-      appUpdate: memoryDb.appUpdate
+      appUpdate: memoryDb.appUpdate,
+      profiles: memoryDb.profiles,
+      playlistLikes: memoryDb.playlistLikes,
+      savedPlaylists: memoryDb.savedPlaylists,
+      follows: memoryDb.follows
     }, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving database.json:', e);
@@ -125,6 +129,10 @@ const memoryDb = {
   userTastes: dbData.userTastes || {},
   taste: dbData.taste || {},
   customTracks: dbData.customTracks || [],
+  profiles: dbData.profiles || {},
+  playlistLikes: dbData.playlistLikes || {},
+  savedPlaylists: dbData.savedPlaylists || {},
+  follows: dbData.follows || {},
   appUpdate: dbData.appUpdate || {
     enabled: false,
     title: 'New Update Available!',
@@ -132,6 +140,56 @@ const memoryDb = {
     apkUrl: 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk'
   }
 };
+
+// Helper: Authenticate session or user
+function getAuthUser(req, fallbackUserId = null) {
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (token && memoryDb.activeSessions[token]) {
+    const session = memoryDb.activeSessions[token];
+    if (session.expiresAt > Date.now()) {
+      return session.user;
+    }
+  }
+  const uid = String(fallbackUserId || '').trim().toLowerCase();
+  if (uid && uid !== 'guest') {
+    const u = memoryDb.users.find(u => String(u.id || u._id || '').toLowerCase() === uid || String(u.email || '').toLowerCase() === uid);
+    if (u) return u;
+  }
+  return null;
+}
+
+// Helper: Get public profile (Safe: NEVER exposes private playlists, email or passwords)
+function getPublicProfile(userId) {
+  if (!userId) return null;
+  const uid = String(userId).toLowerCase().trim();
+  const user = memoryDb.users.find(u => String(u.id || u._id || '').toLowerCase() === uid || String(u.email || '').toLowerCase() === uid);
+  const profile = memoryDb.profiles[uid] || {};
+
+  const cleanName = profile.displayName || user?.name || (user?.email ? user.email.split('@')[0] : 'Music Creator');
+  const cleanUsername = profile.username || (user?.email ? user.email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') : `user_${uid.slice(0, 6)}`);
+  const avatar = profile.avatarUrl || user?.avatar || '/avatars/p1.jpg';
+  const bio = profile.bio || '';
+
+  const userFollows = memoryDb.follows[uid] || { followers: [], following: [] };
+  const followersCount = (userFollows.followers || []).length;
+  const followingCount = (userFollows.following || []).length;
+
+  const userPls = memoryDb.playlists[uid] || memoryDb.playlists[user?.id] || [];
+  const publicPls = userPls.filter(p => p.visibility === 'public');
+
+  return {
+    userId: user?.id || uid,
+    username: cleanUsername,
+    displayName: cleanName,
+    avatar: avatar,
+    bio: bio,
+    followersCount: followersCount,
+    followingCount: followingCount,
+    publicPlaylistsCount: publicPls.length,
+    joinedDate: user?.createdAt || new Date().toISOString()
+  };
+}
 
 // --- Optional Redis persistence (Upstash / Vercel KV) ---
 // Serverless hosts like Vercel forget process memory between requests, which would
@@ -1608,18 +1666,38 @@ async function searchYouTube(query) {
         }
       }
 
+      // ─── Playlists API (Personal & Community Sync) ──────────────────────
       if (pathname === '/api/playlists') {
-        // The app sends the user id in the query (GET/PUT/DELETE) or in the body (POST); accept both.
         const plBody = (req.method === 'POST' || req.method === 'PUT') ? await parseBody(req) : {};
         const userId = parsedUrl.searchParams.get('userId') || plBody.userId || 'guest';
         if (!memoryDb.playlists[userId]) memoryDb.playlists[userId] = [];
 
-        // 1. GET Playlists
+        // 1. GET Playlists (Enforces Privacy!)
         if (req.method === 'GET') {
-          return sendJson(res, 200, { success: true, playlists: memoryDb.playlists[userId] || [] });
+          const authUser = getAuthUser(req, parsedUrl.searchParams.get('authUserId') || userId);
+          const isOwner = authUser && (String(authUser.id || authUser._id).toLowerCase() === String(userId).toLowerCase() || String(authUser.email).toLowerCase() === String(userId).toLowerCase());
+          
+          let list = memoryDb.playlists[userId] || [];
+          if (!isOwner) {
+            // BACKEND SECURITY: Non-owners can ONLY see PUBLIC playlists!
+            list = list.filter(p => p.visibility === 'public');
+          }
+          // Attach creator & likes info
+          const enriched = list.map(p => {
+            const pLikes = memoryDb.playlistLikes[p.id] || [];
+            return {
+              ...p,
+              visibility: p.visibility || 'private',
+              likesCount: pLikes.length || p.likesCount || 0,
+              isLiked: authUser ? pLikes.includes(authUser.id || authUser._id) : false,
+              isSaved: authUser ? (memoryDb.savedPlaylists[authUser.id || authUser._id] || []).includes(p.id) : false,
+              creator: getPublicProfile(p.userId || userId)
+            };
+          });
+          return sendJson(res, 200, { success: true, playlists: enriched });
         }
 
-        // 2. CREATE Playlist
+        // 2. CREATE Playlist (Default visibility: PRIVATE)
         if (req.method === 'POST') {
           const body = plBody;
           const name = (body.name || '').trim() || 'My Playlist';
@@ -1630,21 +1708,28 @@ async function searchYouTube(query) {
             return sendJson(res, 400, { success: false, error: 'A playlist with this name already exists. Please choose a different name.' });
           }
 
+          // Strict Requirement: Default visibility MUST BE 'private'
+          const visibility = body.visibility === 'public' ? 'public' : 'private';
           const newPlaylist = {
             id: `pl_${Date.now()}`,
             name: name,
-            description: body.description || '',
+            description: String(body.description || '').slice(0, 500),
+            coverUrl: body.coverUrl || '',
+            visibility: visibility,
+            userId: userId,
             songs: [],
-            createdAt: new Date().toISOString()
+            likesCount: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
           memoryDb.playlists[userId].unshift(newPlaylist);
           saveDatabase();
           syncPlaylistToNeon(userId, newPlaylist).catch(() => {});
-          console.log(`✅ [PLAYLIST CREATED] "${name}" for user ${userId}`);
+          console.log(`✅ [PLAYLIST CREATED] "${name}" (${visibility}) for user ${userId}`);
           return sendJson(res, 200, { success: true, playlist: newPlaylist });
         }
 
-        // 3. ADD or REMOVE song in Playlist
+        // 3. UPDATE Playlist (Add/Remove song, change details, toggle visibility)
         if (req.method === 'PUT') {
           const body = plBody;
           const playlistId = String(body.playlistId || '');
@@ -1655,12 +1740,18 @@ async function searchYouTube(query) {
             return sendJson(res, 404, { success: false, message: 'Playlist not found' });
           }
 
+          // Verification: only owner can modify
+          if (pl.userId && String(pl.userId).toLowerCase() !== String(userId).toLowerCase()) {
+            return sendJson(res, 403, { success: false, error: 'Unauthorized to modify this playlist' });
+          }
+
           if (action === 'add' && body.song) {
             const song = body.song;
             const songId = song.id || song.videoId;
             const exists = pl.songs.some(s => (s.id || s.videoId) === songId);
             if (!exists) {
               pl.songs.unshift(song);
+              pl.updatedAt = new Date().toISOString();
               saveDatabase();
               syncPlaylistToNeon(userId, pl).catch(() => {});
             }
@@ -1670,6 +1761,30 @@ async function searchYouTube(query) {
           if (action === 'remove' && body.songId) {
             const sid = String(body.songId);
             pl.songs = pl.songs.filter(s => String(s.id || s.videoId) !== sid);
+            pl.updatedAt = new Date().toISOString();
+            saveDatabase();
+            syncPlaylistToNeon(userId, pl).catch(() => {});
+            return sendJson(res, 200, { success: true, playlist: pl });
+          }
+
+          // Change visibility: Public <-> Private
+          if (action === 'update_visibility' || body.visibility !== undefined) {
+            const newVis = body.visibility === 'public' ? 'public' : 'private';
+            pl.visibility = newVis;
+            pl.updatedAt = new Date().toISOString();
+            saveDatabase();
+            syncPlaylistToNeon(userId, pl).catch(() => {});
+            console.log(`🔒 [PLAYLIST VISIBILITY CHANGED] "${pl.name}" is now ${newVis}`);
+            return sendJson(res, 200, { success: true, playlist: pl, visibility: newVis });
+          }
+
+          // Update details: Name, description, cover
+          if (action === 'update_details') {
+            if (body.name) pl.name = String(body.name).trim();
+            if (body.description !== undefined) pl.description = String(body.description).slice(0, 500);
+            if (body.coverUrl !== undefined) pl.coverUrl = String(body.coverUrl);
+            if (body.visibility !== undefined) pl.visibility = body.visibility === 'public' ? 'public' : 'private';
+            pl.updatedAt = new Date().toISOString();
             saveDatabase();
             syncPlaylistToNeon(userId, pl).catch(() => {});
             return sendJson(res, 200, { success: true, playlist: pl });
@@ -1694,6 +1809,589 @@ async function searchYouTube(query) {
           toDelete.forEach(p => deletePlaylistFromNeon(p.id || p._id).catch(() => {}));
           return sendJson(res, 200, { success: true, message: 'Playlist deleted successfully' });
         }
+      }
+
+      // ─── Single Playlist Details (Enforces Backend Privacy Check) ────────
+      if (pathname === '/api/playlists/details' && req.method === 'GET') {
+        const plId = parsedUrl.searchParams.get('id') || '';
+        const reqUserId = parsedUrl.searchParams.get('userId') || 'guest';
+        const authUser = getAuthUser(req, reqUserId);
+
+        let targetPl = null;
+        let ownerId = null;
+        for (const [uid, pls] of Object.entries(memoryDb.playlists)) {
+          const found = pls.find(p => String(p.id || p._id) === String(plId));
+          if (found) {
+            targetPl = found;
+            ownerId = uid;
+            break;
+          }
+        }
+
+        if (!targetPl) {
+          return sendJson(res, 404, { success: false, error: 'Playlist not found' });
+        }
+
+        const isOwner = authUser && (String(authUser.id || authUser._id).toLowerCase() === String(ownerId).toLowerCase() || String(authUser.email).toLowerCase() === String(ownerId).toLowerCase() || String(authUser.id || authUser._id).toLowerCase() === String(targetPl.userId).toLowerCase());
+
+        // BACKEND PRIVACY ENFORCEMENT: If private, reject non-owners immediately!
+        if (targetPl.visibility !== 'public' && !isOwner) {
+          return sendJson(res, 403, { success: false, error: 'This playlist is private and cannot be viewed by unauthorized users.' });
+        }
+
+        const creator = getPublicProfile(targetPl.userId || ownerId);
+        const pLikes = memoryDb.playlistLikes[targetPl.id] || [];
+        const isLiked = authUser ? pLikes.includes(authUser.id || authUser._id) : false;
+        const isSaved = authUser ? (memoryDb.savedPlaylists[authUser.id || authUser._id] || []).includes(targetPl.id) : false;
+
+        return sendJson(res, 200, {
+          success: true,
+          playlist: {
+            ...targetPl,
+            visibility: targetPl.visibility || 'private',
+            likesCount: pLikes.length || targetPl.likesCount || 0,
+            isLiked,
+            isSaved,
+            creator
+          }
+        });
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // ─── SOCIAL MUSIC COMMUNITY APIS ──────────────────────────────────────
+      // ══════════════════════════════════════════════════════════════════════
+
+      // 1. Community Feed (Trending, Recent, Popular Creators, Recommended)
+      if (pathname === '/api/community/feed' && req.method === 'GET') {
+        const reqUserId = parsedUrl.searchParams.get('userId') || 'guest';
+        const authUser = getAuthUser(req, reqUserId);
+
+        const allPublicPlaylists = [];
+        for (const [uid, pls] of Object.entries(memoryDb.playlists)) {
+          for (const pl of pls) {
+            // Strictly ONLY public playlists!
+            if (pl.visibility === 'public') {
+              const creator = getPublicProfile(pl.userId || uid);
+              const pLikes = memoryDb.playlistLikes[pl.id] || [];
+              const likesCount = pLikes.length || pl.likesCount || 0;
+              const isLiked = authUser ? pLikes.includes(authUser.id || authUser._id) : false;
+              const isSaved = authUser ? (memoryDb.savedPlaylists[authUser.id || authUser._id] || []).includes(pl.id) : false;
+              const cover = pl.coverUrl || pl.songs?.[0]?.image || '/logo.png';
+
+              allPublicPlaylists.push({
+                ...pl,
+                coverUrl: cover,
+                likesCount,
+                isLiked,
+                isSaved,
+                creator
+              });
+            }
+          }
+        }
+
+        // Sort feeds
+        const trending = [...allPublicPlaylists].sort((a, b) => {
+          const scoreA = (a.likesCount * 4) + (a.songs?.length || 0);
+          const scoreB = (b.likesCount * 4) + (b.songs?.length || 0);
+          return scoreB - scoreA;
+        }).slice(0, 20);
+
+        const recentlyAdded = [...allPublicPlaylists].sort((a, b) => {
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        }).slice(0, 20);
+
+        const recommended = [...allPublicPlaylists].sort(() => 0.5 - Math.random()).slice(0, 15);
+
+        // Gather real registered creators
+        const creatorsMap = new Map();
+        for (const u of memoryDb.users) {
+          if (u && u.id) {
+            const pubProfile = getPublicProfile(u.id);
+            if (pubProfile) {
+              const isFollowing = authUser ? (memoryDb.follows[authUser.id || authUser._id]?.following || []).includes(u.id) : false;
+              creatorsMap.set(u.id, { ...pubProfile, isFollowing });
+            }
+          }
+        }
+        const creatorsList = Array.from(creatorsMap.values());
+        const popularCreators = [...creatorsList].sort((a, b) => b.followersCount - a.followersCount).slice(0, 12);
+        const discoverUsers = [...creatorsList].sort(() => 0.5 - Math.random()).slice(0, 12);
+
+        return sendJson(res, 200, {
+          success: true,
+          trending,
+          recentlyAdded,
+          recommended,
+          popularCreators,
+          discoverUsers
+        });
+      }
+
+      // 2. Community Search & Filter
+      if (pathname === '/api/community/search' && req.method === 'GET') {
+        const query = (parsedUrl.searchParams.get('q') || '').trim().toLowerCase();
+        const filter = parsedUrl.searchParams.get('filter') || 'all'; // all, trending, recent, creators, playlists
+        const reqUserId = parsedUrl.searchParams.get('userId') || 'guest';
+        const authUser = getAuthUser(req, reqUserId);
+
+        const matchedPlaylists = [];
+        for (const [uid, pls] of Object.entries(memoryDb.playlists)) {
+          for (const pl of pls) {
+            if (pl.visibility === 'public') {
+              const creator = getPublicProfile(pl.userId || uid);
+              const pLikes = memoryDb.playlistLikes[pl.id] || [];
+              const likesCount = pLikes.length || pl.likesCount || 0;
+              const isLiked = authUser ? pLikes.includes(authUser.id || authUser._id) : false;
+              const isSaved = authUser ? (memoryDb.savedPlaylists[authUser.id || authUser._id] || []).includes(pl.id) : false;
+              const cover = pl.coverUrl || pl.songs?.[0]?.image || '/logo.png';
+
+              const matchesName = (pl.name || '').toLowerCase().includes(query);
+              const matchesDesc = (pl.description || '').toLowerCase().includes(query);
+              const matchesCreator = (creator.displayName || '').toLowerCase().includes(query) || (creator.username || '').toLowerCase().includes(query);
+              const matchesSong = (pl.songs || []).some(s => (s.name || s.title || '').toLowerCase().includes(query) || (s.artist || '').toLowerCase().includes(query));
+
+              if (!query || matchesName || matchesDesc || matchesCreator || matchesSong) {
+                matchedPlaylists.push({
+                  ...pl,
+                  coverUrl: cover,
+                  likesCount,
+                  isLiked,
+                  isSaved,
+                  creator
+                });
+              }
+            }
+          }
+        }
+
+        // Apply filters
+        if (filter === 'trending') {
+          matchedPlaylists.sort((a, b) => (b.likesCount * 3 + b.songs.length) - (a.likesCount * 3 + a.songs.length));
+        } else if (filter === 'recent') {
+          matchedPlaylists.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        }
+
+        // Match Creators
+        const matchedCreators = [];
+        for (const u of memoryDb.users) {
+          if (u && u.id) {
+            const pubProfile = getPublicProfile(u.id);
+            const matchesName = (pubProfile.displayName || '').toLowerCase().includes(query);
+            const matchesUsername = (pubProfile.username || '').toLowerCase().includes(query);
+            const matchesBio = (pubProfile.bio || '').toLowerCase().includes(query);
+            if (!query || matchesName || matchesUsername || matchesBio) {
+              const isFollowing = authUser ? (memoryDb.follows[authUser.id || authUser._id]?.following || []).includes(u.id) : false;
+              matchedCreators.push({ ...pubProfile, isFollowing });
+            }
+          }
+        }
+
+        return sendJson(res, 200, {
+          success: true,
+          query,
+          playlists: filter === 'creators' ? [] : matchedPlaylists,
+          creators: filter === 'playlists' ? [] : matchedCreators
+        });
+      }
+
+      // 3. Playlist Likes (Like / Unlike Public Playlists)
+      if (pathname === '/api/community/playlists/like' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const playlistId = String(body.playlistId || '').trim();
+        const reqUserId = body.userId || parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Please sign in to like playlists.' });
+        }
+        const uid = authUser.id || authUser._id;
+
+        // Find playlist
+        let pl = null;
+        for (const [owner, pls] of Object.entries(memoryDb.playlists)) {
+          const found = pls.find(p => String(p.id || p._id) === playlistId);
+          if (found) { pl = found; break; }
+        }
+
+        if (!pl) return sendJson(res, 404, { success: false, error: 'Playlist not found.' });
+        if (pl.visibility !== 'public') {
+          return sendJson(res, 403, { success: false, error: 'Only public playlists can be liked.' });
+        }
+
+        if (!memoryDb.playlistLikes[playlistId]) memoryDb.playlistLikes[playlistId] = [];
+        const likesArr = memoryDb.playlistLikes[playlistId];
+        const existingIdx = likesArr.indexOf(uid);
+        let isLiked = false;
+
+        if (existingIdx !== -1) {
+          likesArr.splice(existingIdx, 1);
+          isLiked = false;
+        } else {
+          likesArr.push(uid);
+          isLiked = true;
+        }
+
+        pl.likesCount = likesArr.length;
+        saveDatabase();
+        syncPlaylistLikeToNeon(uid, playlistId, isLiked).catch(() => {});
+        syncPlaylistToNeon(pl.userId, pl).catch(() => {});
+
+        return sendJson(res, 200, {
+          success: true,
+          isLiked,
+          likesCount: pl.likesCount
+        });
+      }
+
+      // 4. Save Playlist to Library (Save / Bookmark without duplicate playlist records)
+      if (pathname === '/api/community/playlists/save' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const playlistId = String(body.playlistId || '').trim();
+        const reqUserId = body.userId || parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Please sign in to save playlists to your library.' });
+        }
+        const uid = authUser.id || authUser._id;
+
+        // Verify public
+        let pl = null;
+        for (const [owner, pls] of Object.entries(memoryDb.playlists)) {
+          const found = pls.find(p => String(p.id || p._id) === playlistId);
+          if (found) { pl = found; break; }
+        }
+        if (!pl) return sendJson(res, 404, { success: false, error: 'Playlist not found.' });
+        if (pl.visibility !== 'public') {
+          return sendJson(res, 403, { success: false, error: 'Only public playlists can be saved.' });
+        }
+
+        if (!memoryDb.savedPlaylists[uid]) memoryDb.savedPlaylists[uid] = [];
+        const savedList = memoryDb.savedPlaylists[uid];
+        const idx = savedList.indexOf(playlistId);
+        let isSaved = false;
+
+        if (idx !== -1) {
+          savedList.splice(idx, 1);
+          isSaved = false;
+        } else {
+          savedList.push(playlistId);
+          isSaved = true;
+        }
+
+        saveDatabase();
+        syncSavedPlaylistToNeon(uid, playlistId, isSaved).catch(() => {});
+
+        return sendJson(res, 200, {
+          success: true,
+          isSaved,
+          message: isSaved ? 'Playlist saved to your library' : 'Playlist removed from your library'
+        });
+      }
+
+      // 5. Get User's Saved Playlists
+      if (pathname === '/api/community/playlists/saved' && req.method === 'GET') {
+        const reqUserId = parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+        if (!authUser) {
+          return sendJson(res, 200, { success: true, playlists: [] });
+        }
+        const uid = authUser.id || authUser._id;
+        const savedIds = memoryDb.savedPlaylists[uid] || [];
+
+        const savedPlaylists = [];
+        for (const [owner, pls] of Object.entries(memoryDb.playlists)) {
+          for (const pl of pls) {
+            if (savedIds.includes(pl.id) && pl.visibility === 'public') {
+              const creator = getPublicProfile(pl.userId || owner);
+              const pLikes = memoryDb.playlistLikes[pl.id] || [];
+              savedPlaylists.push({
+                ...pl,
+                coverUrl: pl.coverUrl || pl.songs?.[0]?.image || '/logo.png',
+                likesCount: pLikes.length || pl.likesCount || 0,
+                isLiked: pLikes.includes(uid),
+                isSaved: true,
+                creator
+              });
+            }
+          }
+        }
+
+        return sendJson(res, 200, { success: true, playlists: savedPlaylists });
+      }
+
+      // 6. Follow / Unfollow User
+      if (pathname === '/api/community/users/follow' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const followingId = String(body.followingId || '').trim();
+        const reqUserId = body.followerId || body.userId || parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Please sign in to follow creators.' });
+        }
+        const followerId = authUser.id || authUser._id;
+
+        if (String(followerId).toLowerCase() === String(followingId).toLowerCase()) {
+          return sendJson(res, 400, { success: false, error: 'You cannot follow yourself.' });
+        }
+
+        if (!memoryDb.follows[followingId]) memoryDb.follows[followingId] = { followers: [], following: [] };
+        if (!memoryDb.follows[followerId]) memoryDb.follows[followerId] = { followers: [], following: [] };
+
+        const targetFollowers = memoryDb.follows[followingId].followers;
+        const myFollowing = memoryDb.follows[followerId].following;
+
+        const idx = targetFollowers.indexOf(followerId);
+        let isFollowing = false;
+
+        if (idx !== -1) {
+          // Unfollow
+          targetFollowers.splice(idx, 1);
+          const idx2 = myFollowing.indexOf(followingId);
+          if (idx2 !== -1) myFollowing.splice(idx2, 1);
+          isFollowing = false;
+        } else {
+          // Follow
+          targetFollowers.push(followerId);
+          if (!myFollowing.includes(followingId)) myFollowing.push(followingId);
+          isFollowing = true;
+        }
+
+        saveDatabase();
+        syncUserFollowToNeon(followerId, followingId, isFollowing).catch(() => {});
+
+        return sendJson(res, 200, {
+          success: true,
+          isFollowing,
+          followersCount: targetFollowers.length,
+          followingCount: memoryDb.follows[followingId].following.length
+        });
+      }
+
+      // 7. Get Followers / Following Lists
+      if (pathname === '/api/community/users/followers' && req.method === 'GET') {
+        const targetUserId = parsedUrl.searchParams.get('userId');
+        const fObj = memoryDb.follows[targetUserId] || { followers: [], following: [] };
+        const list = (fObj.followers || []).map(id => getPublicProfile(id)).filter(Boolean);
+        return sendJson(res, 200, { success: true, followers: list });
+      }
+
+      if (pathname === '/api/community/users/following' && req.method === 'GET') {
+        const targetUserId = parsedUrl.searchParams.get('userId');
+        const fObj = memoryDb.follows[targetUserId] || { followers: [], following: [] };
+        const list = (fObj.following || []).map(id => getPublicProfile(id)).filter(Boolean);
+        return sendJson(res, 200, { success: true, following: list });
+      }
+
+      // 8. Public Creator Profile (Never exposes private playlists, email or passwords)
+      if (pathname === '/api/community/profile' && req.method === 'GET') {
+        const targetUserId = parsedUrl.searchParams.get('userId');
+        const targetUsername = parsedUrl.searchParams.get('username');
+        const reqUserId = parsedUrl.searchParams.get('authUserId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        let user = null;
+        if (targetUserId) {
+          user = memoryDb.users.find(u => String(u.id || u._id).toLowerCase() === String(targetUserId).toLowerCase() || String(u.email).toLowerCase() === String(targetUserId).toLowerCase());
+        } else if (targetUsername) {
+          const cleanU = targetUsername.replace(/^@/, '').toLowerCase();
+          // Check profiles first
+          for (const [uid, prof] of Object.entries(memoryDb.profiles)) {
+            if (prof.username && prof.username.toLowerCase() === cleanU) {
+              user = memoryDb.users.find(u => u.id === uid);
+              break;
+            }
+          }
+          if (!user) {
+            user = memoryDb.users.find(u => u.email && u.email.split('@')[0].toLowerCase() === cleanU);
+          }
+        }
+
+        if (!user) {
+          return sendJson(res, 404, { success: false, error: 'User profile not found.' });
+        }
+
+        const profile = getPublicProfile(user.id);
+        const isFollowing = authUser ? (memoryDb.follows[user.id]?.followers || []).includes(authUser.id || authUser._id) : false;
+
+        // Fetch user's PUBLIC playlists only
+        const userPlaylists = (memoryDb.playlists[user.id] || memoryDb.playlists[user.email] || [])
+          .filter(p => p.visibility === 'public')
+          .map(p => {
+            const pLikes = memoryDb.playlistLikes[p.id] || [];
+            return {
+              ...p,
+              coverUrl: p.coverUrl || p.songs?.[0]?.image || '/logo.png',
+              likesCount: pLikes.length || p.likesCount || 0,
+              isLiked: authUser ? pLikes.includes(authUser.id || authUser._id) : false,
+              isSaved: authUser ? (memoryDb.savedPlaylists[authUser.id || authUser._id] || []).includes(p.id) : false,
+              creator: profile
+            };
+          });
+
+        return sendJson(res, 200, {
+          success: true,
+          profile: {
+            ...profile,
+            isFollowing,
+            playlists: userPlaylists
+          }
+        });
+      }
+
+      // 9. Edit Own Profile (Display Name, Username, Bio)
+      if ((pathname === '/api/community/profile/edit' || pathname === '/api/auth/profile') && req.method === 'POST') {
+        const body = await parseBody(req);
+        const reqUserId = body.userId || parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Unauthenticated. Please sign in.' });
+        }
+        const uid = authUser.id || authUser._id;
+
+        // Username validation (3-30 chars, alphanumeric + underscore)
+        let username = body.username ? String(body.username).replace(/^@/, '').trim().toLowerCase() : null;
+        if (username) {
+          if (!/^[a-z0-9_]{3,30}$/.test(username)) {
+            return sendJson(res, 400, { success: false, error: 'Username must be 3-30 characters with letters, numbers and underscores only.' });
+          }
+          // Uniqueness check across other users
+          for (const [otherUid, prof] of Object.entries(memoryDb.profiles)) {
+            if (otherUid !== uid && prof.username && prof.username.toLowerCase() === username) {
+              return sendJson(res, 400, { success: false, error: 'This username is already taken. Please choose another.' });
+            }
+          }
+        }
+
+        // Bio character limit (max 300)
+        const bio = String(body.bio || '').slice(0, 300);
+        const displayName = (body.displayName || body.name || authUser.name || '').trim().slice(0, 50);
+        const avatarUrl = body.avatarUrl || body.avatar || authUser.avatar;
+
+        if (!memoryDb.profiles[uid]) memoryDb.profiles[uid] = {};
+        const prof = memoryDb.profiles[uid];
+        prof.userId = uid;
+        if (username) prof.username = username;
+        if (displayName) prof.displayName = displayName;
+        prof.bio = bio;
+        if (avatarUrl) prof.avatarUrl = avatarUrl;
+        prof.updatedAt = new Date().toISOString();
+
+        // Also update core user in memoryDb
+        authUser.name = displayName || authUser.name;
+        authUser.avatar = avatarUrl || authUser.avatar;
+        const dbUser = memoryDb.users.find(u => u.id === uid || u.email === authUser.email);
+        if (dbUser) {
+          dbUser.name = displayName || dbUser.name;
+          dbUser.avatar = avatarUrl || dbUser.avatar;
+        }
+
+        saveDatabase();
+        syncProfileToNeon(uid, prof).catch(() => {});
+        syncUserToNeon(authUser).catch(() => {});
+
+        console.log(`👤 [PROFILE UPDATED] ${displayName} (@${prof.username || uid})`);
+        return sendJson(res, 200, {
+          success: true,
+          message: 'Profile updated successfully',
+          profile: getPublicProfile(uid),
+          user: {
+            id: uid,
+            name: displayName,
+            email: authUser.email,
+            avatar: avatarUrl
+          }
+        });
+      }
+
+      // 10. Profile Photo Upload (Supports JPG, PNG, WEBP with 5MB validation)
+      if (pathname === '/api/community/profile/upload-avatar' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const reqUserId = body.userId || parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Please sign in to upload a profile photo.' });
+        }
+        const uid = authUser.id || authUser._id;
+        const imageBase64 = String(body.imageBase64 || body.image || '').trim();
+
+        if (!imageBase64 || !imageBase64.startsWith('data:image/')) {
+          return sendJson(res, 400, { success: false, error: 'Invalid image format. Supported formats: JPG, JPEG, PNG, WEBP.' });
+        }
+
+        // Validate format: jpg, jpeg, png, webp
+        const mimeMatch = imageBase64.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+        if (!mimeMatch) {
+          return sendJson(res, 400, { success: false, error: 'Only JPG, JPEG, PNG, and WEBP image formats are supported.' });
+        }
+        const ext = mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase();
+
+        // Extract base64 payload & validate size (Max 5MB)
+        const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        if (buffer.length > 5 * 1024 * 1024) {
+          return sendJson(res, 400, { success: false, error: 'Image exceeds maximum allowed size of 5MB.' });
+        }
+
+        // Save image to custom avatars storage
+        const customDir = path.join(PUBLIC_DIR, 'avatars', 'custom');
+        if (!fs.existsSync(customDir)) fs.mkdirSync(customDir, { recursive: true });
+
+        const safeUid = String(uid).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `avatar_${safeUid}_${Date.now()}.${ext}`;
+        const filePath = path.join(customDir, filename);
+
+        fs.writeFileSync(filePath, buffer);
+        const avatarUrl = `/avatars/custom/${filename}`;
+
+        // Update profile & user
+        if (!memoryDb.profiles[uid]) memoryDb.profiles[uid] = {};
+        memoryDb.profiles[uid].avatarUrl = avatarUrl;
+        memoryDb.profiles[uid].updatedAt = new Date().toISOString();
+
+        authUser.avatar = avatarUrl;
+        const dbUser = memoryDb.users.find(u => u.id === uid || u.email === authUser.email);
+        if (dbUser) dbUser.avatar = avatarUrl;
+
+        saveDatabase();
+        syncProfileToNeon(uid, memoryDb.profiles[uid]).catch(() => {});
+        syncUserToNeon(authUser).catch(() => {});
+
+        console.log(`📸 [AVATAR UPLOADED] User ${uid} -> ${avatarUrl}`);
+        return sendJson(res, 200, {
+          success: true,
+          message: 'Profile photo updated successfully',
+          avatarUrl: avatarUrl
+        });
+      }
+
+      // 11. Delete / Reset Profile Avatar
+      if (pathname === '/api/community/profile/avatar' && req.method === 'DELETE') {
+        const reqUserId = parsedUrl.searchParams.get('userId');
+        const authUser = getAuthUser(req, reqUserId);
+        if (!authUser) {
+          return sendJson(res, 401, { success: false, error: 'Unauthorized.' });
+        }
+        const uid = authUser.id || authUser._id;
+        const defaultAvatar = '/avatars/p1.jpg';
+
+        if (!memoryDb.profiles[uid]) memoryDb.profiles[uid] = {};
+        memoryDb.profiles[uid].avatarUrl = defaultAvatar;
+        memoryDb.profiles[uid].updatedAt = new Date().toISOString();
+
+        authUser.avatar = defaultAvatar;
+        const dbUser = memoryDb.users.find(u => u.id === uid || u.email === authUser.email);
+        if (dbUser) dbUser.avatar = defaultAvatar;
+
+        saveDatabase();
+        syncProfileToNeon(uid, memoryDb.profiles[uid]).catch(() => {});
+        syncUserToNeon(authUser).catch(() => {});
+
+        return sendJson(res, 200, { success: true, avatarUrl: defaultAvatar, message: 'Profile photo reset to default.' });
       }
 
       if (pathname === '/api/user/taste') {
