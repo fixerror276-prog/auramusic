@@ -65,11 +65,11 @@ export async function neonQuery(query, params = []) {
 async function neonInit() {
   if (!neonReady) {
     neonReady = (async () => {
-      // Ensure aura_kv table exists
+      // 1. Core KV table (Atomic state store for fast JSON snapshots)
       await neonQuery(
         'CREATE TABLE IF NOT EXISTS aura_kv (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())'
       );
-      // Ensure users table exists in Neon Postgres
+      // 2. Users table
       await neonQuery(
         `CREATE TABLE IF NOT EXISTS users (
           id varchar(255) PRIMARY KEY,
@@ -80,6 +80,38 @@ async function neonInit() {
           auth_provider text,
           created_at timestamptz DEFAULT now()
         )`
+      ).catch(() => {});
+      // 3. User Listening Events Table (Permanent behavior log)
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_listening_events (
+          id text PRIMARY KEY,
+          user_id text NOT NULL,
+          song_id text NOT NULL,
+          event_type text NOT NULL,
+          listened_sec integer DEFAULT 0,
+          depth_score real DEFAULT 0,
+          context_key text,
+          created_at timestamptz DEFAULT now()
+        )`
+      ).catch(() => {});
+      // 4. User Taste Profiles & DNA Table (Structured relational profile)
+      await neonQuery(
+        `CREATE TABLE IF NOT EXISTS user_taste_profiles (
+          user_id text PRIMARY KEY,
+          persona text,
+          top_moods jsonb,
+          top_genres jsonb,
+          top_artists jsonb,
+          tag_weights jsonb,
+          contextual_taste jsonb,
+          volatility_type text,
+          milestones jsonb,
+          last_updated timestamptz DEFAULT now()
+        )`
+      ).catch(() => {});
+      // 5. Index for fast querying user events
+      await neonQuery(
+        'CREATE INDEX IF NOT EXISTS idx_listening_user_created ON user_listening_events (user_id, created_at DESC)'
       ).catch(() => {});
     })().catch(e => { neonReady = null; throw e; });
   }
