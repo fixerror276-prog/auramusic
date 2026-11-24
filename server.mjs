@@ -14,6 +14,7 @@ import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAu
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 import { resolveFastAudio, resolveSaavnAudio, searchSongsSaavnDev } from './fast_audio.mjs';
+import { recordTaste, buildDNA, processDailyDecay, getContext, forYou, generateAutoPlaylists, getMoodRecommendations, getUserDashboardAnalytics, clearUserTasteData, toSong } from './taste.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,6 +104,7 @@ function saveDatabase() {
       likes: memoryDb.likes,
       recentlyPlayed: memoryDb.recentlyPlayed,
       userTastes: memoryDb.userTastes,
+      taste: memoryDb.taste,
       appUpdate: memoryDb.appUpdate
     }, null, 2), 'utf8');
   } catch (e) {
@@ -120,6 +122,7 @@ const memoryDb = {
   likes: dbData.likes || {},
   recentlyPlayed: dbData.recentlyPlayed || {},
   userTastes: dbData.userTastes || {},
+  taste: dbData.taste || {},
   appUpdate: dbData.appUpdate || {
     enabled: false,
     title: 'New Update Available!',
@@ -134,7 +137,7 @@ const memoryDb = {
 // whole state is loaded at the start of each API request and saved before the
 // response is sent (only if something changed).
 const STATE_KEY = 'auramusic:state:v1';
-const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'appUpdate', 'adminKeys'];
+const STATE_FIELDS = ['users', 'pendingRegistrations', 'rateLimits', 'activeSessions', 'playlists', 'likes', 'recentlyPlayed', 'userTastes', 'taste', 'appUpdate', 'adminKeys'];
 
 function snapshotState() {
   return Object.fromEntries(STATE_FIELDS.map(f => [f, memoryDb[f]]));
@@ -1648,6 +1651,131 @@ async function searchYouTube(query) {
         }
       }
 
+      // ─── Advanced Taste DNA & 4D Event Tracking APIs ──────────────────────
+      // POST /api/taste/event  -> record user action (play/skip/like/dislike/replay/search)
+      if (pathname === '/api/taste/event' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const recorded = recordTaste(memoryDb, body);
+        if (recorded) {
+          saveDatabase();
+        }
+        const userId = String(body?.userId || '').slice(0, 80);
+        const moodShift = Boolean(memoryDb.taste?.[userId]?._moodShift);
+        return sendJson(res, 200, {
+          success: true,
+          recorded,
+          moodShift,
+          context: getContext()
+        });
+      }
+
+      // GET /api/taste/dna?userId=X -> return full Taste DNA Card
+      if (pathname === '/api/taste/dna' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        let dna = memoryDb.taste?.[userId]?.dnaCard;
+        if (!dna && memoryDb.taste?.[userId]) {
+          dna = buildDNA(memoryDb, userId);
+          if (dna) saveDatabase();
+        }
+        return sendJson(res, 200, {
+          success: true,
+          userId,
+          dna: dna || null,
+          isColdStart: !dna || (dna.totalEvents || 0) === 0
+        });
+      }
+
+      // GET /api/taste/journey?userId=X&days=7 -> daily emotional arc
+      if (pathname === '/api/taste/journey' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const days = Math.min(30, Math.max(1, parseInt(parsedUrl.searchParams.get('days') || '7', 10)));
+        const profile = memoryDb.taste?.[userId];
+        const journey = profile?.journey || {};
+        const dates = Object.keys(journey).sort().slice(-days);
+        const arc = {};
+        for (const d of dates) arc[d] = journey[d];
+        return sendJson(res, 200, {
+          success: true,
+          userId,
+          journey: arc,
+          contexts: profile?.contexts || {}
+        });
+      }
+
+      // POST /api/check-mood-shift -> real-time check
+      if (pathname === '/api/check-mood-shift') {
+        const body = req.method === 'POST' ? await parseBody(req) : {};
+        const userId = body.userId || parsedUrl.searchParams.get('userId') || 'guest';
+        const profile = memoryDb.taste?.[userId];
+        const shiftDetected = Boolean(profile?._moodShift || (profile?.consecutiveSkips || 0) >= 3);
+        return sendJson(res, 200, {
+          success: true,
+          userId,
+          shiftDetected,
+          consecutiveSkips: profile?.consecutiveSkips || 0
+        });
+      }
+
+      // POST /api/taste/admin/decay -> trigger nightly decay & DNA rebuild
+      if (pathname === '/api/taste/admin/decay' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const auth = adminKeyOk(req, body);
+        if (auth !== 'ok') {
+          return sendJson(res, 401, { success: false, error: 'Admin key required' });
+        }
+        const stats = processDailyDecay(memoryDb);
+        saveDatabase();
+        return sendJson(res, 200, { success: true, ...stats, timestamp: new Date().toISOString() });
+      }
+
+      // GET /api/taste/foryou?userId=X -> personalized recommendations
+      if (pathname === '/api/taste/foryou' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const songs = await forYou(memoryDb, userId, ytAudioClient, getRelated, toSong).catch(() => []);
+        return sendJson(res, 200, songs);
+      }
+
+      // GET /api/taste/auto-playlists?userId=X -> generate 12 personalized auto-playlists
+      if (pathname === '/api/taste/auto-playlists' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const searchFn = async (q) => {
+          const r = await searchSongsSaavnDev(q).catch(() => []);
+          return r || [];
+        };
+        const playlists = await generateAutoPlaylists(memoryDb, userId, searchFn);
+        saveDatabase();
+        return sendJson(res, 200, { success: true, userId, playlists });
+      }
+
+      // GET /api/taste/mood?mood=romantic&userId=X -> mood-based recommendation
+      if (pathname === '/api/taste/mood' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const mood = (parsedUrl.searchParams.get('mood') || 'chill').toLowerCase();
+        const searchFn = async (q) => {
+          const r = await searchSongsSaavnDev(q).catch(() => []);
+          return r || [];
+        };
+        const songs = await getMoodRecommendations(memoryDb, userId, mood, searchFn);
+        return sendJson(res, 200, { success: true, mood, songs });
+      }
+
+      // GET /api/taste/dashboard?userId=X -> complete user analytics dashboard
+      if (pathname === '/api/taste/dashboard' && req.method === 'GET') {
+        const userId = parsedUrl.searchParams.get('userId') || 'guest';
+        const dashboard = getUserDashboardAnalytics(memoryDb, userId);
+        return sendJson(res, 200, { success: true, dashboard });
+      }
+
+      // POST /api/taste/clear-history -> user privacy control to clear listening data
+      if (pathname === '/api/taste/clear-history' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const userId = body.userId || parsedUrl.searchParams.get('userId');
+        if (!userId) return sendJson(res, 400, { error: 'userId is required' });
+        const deleted = clearUserTasteData(memoryDb, userId, body.deleteEntireProfile === true);
+        if (deleted) saveDatabase();
+        return sendJson(res, 200, { success: true, message: 'Listening data cleared successfully' });
+      }
+
       if (pathname === '/api/likes') {
         if (req.method === 'GET') {
           const userId = parsedUrl.searchParams.get('userId') || 'guest';
@@ -1928,6 +2056,45 @@ async function searchYouTube(query) {
   res.end('Not Found');
 });
 
+// ─── Automated Nightly Decay Scheduler (~2:00 AM IST / 20:30 UTC) ───
+function scheduleNightlyDecay() {
+  const computeDelayToNextRun = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setUTCHours(20, 30, 0, 0); // 20:30 UTC = 02:00 AM IST
+    if (next <= now) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+    return next.getTime() - now.getTime();
+  };
+
+  const delay = computeDelayToNextRun();
+  console.log(`[Taste] Nightly decay scheduled in ${(delay / 3600000).toFixed(2)} hours`);
+
+  setTimeout(() => {
+    try {
+      console.log('[Taste] Running nightly taste decay and DNA rebuild...');
+      const stats = processDailyDecay(memoryDb);
+      saveDatabase();
+      console.log('[Taste] Nightly decay completed:', stats);
+    } catch (err) {
+      console.error('[Taste] Nightly decay failed:', err);
+    }
+    // Repeat daily
+    setInterval(() => {
+      try {
+        console.log('[Taste] Running daily recurring decay...');
+        const stats = processDailyDecay(memoryDb);
+        saveDatabase();
+        console.log('[Taste] Daily decay completed:', stats);
+      } catch (err) {
+        console.error('[Taste] Daily decay failed:', err);
+      }
+    }, 24 * 60 * 60 * 1000);
+  }, delay);
+}
+
 server.listen(PORT, () => {
   console.log(`AuraMusic server running at http://localhost:${PORT}`);
+  scheduleNightlyDecay();
 });
