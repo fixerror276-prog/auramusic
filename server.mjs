@@ -2017,10 +2017,15 @@ async function searchYouTube(query) {
       }
 
       // ─── Stream warm-up endpoint ─────────────────────────────────────────
-      // GET /api/yt/warm?id=VIDEOID  - pre-resolve audio URL and cache it
+      // GET /api/yt/warm?id=VIDEOID&title=...&artist=...  - pre-resolve audio URL and cache it
       if (pathname === '/api/yt/warm' && req.method === 'GET') {
         const videoId = (parsedUrl.searchParams.get('id') || '').replace(/^yt[-_]/, '').trim();
+        const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || '';
+        const qArtist = parsedUrl.searchParams.get('artist') || '';
         if (videoId) {
+          if (qTitle) {
+            resolveFastAudio(videoId, qTitle, qArtist).catch(() => {});
+          }
           // Race ytdl + Piped/Invidious simultaneously, cache both results
           warmAudio(ytAudioClient, [videoId]);
         }

@@ -49,6 +49,7 @@
         p: urlPromise.then(function (data) {
           if (data && data.streamUrl) {
             store[id].url = data.streamUrl;
+            if (window.__auraStreamCache) window.__auraStreamCache.set(id, data.streamUrl);
             // Fire first-chunk prefetch immediately after URL resolved (parallel)
             store[id].chunkP = prefetchFirstChunk(data.streamUrl);
             // Return a fake Response so __pfGet is happy

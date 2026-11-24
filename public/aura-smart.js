@@ -37,29 +37,236 @@
     setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2500);
   }
 
-  // ── 1. Stream Pre-Warm (fast playback ≤ 1.5s) ───────────────────────────
-  const warmedIds = new Set();
-  function warmVideoId(videoId) {
-    if (!videoId || warmedIds.has(videoId)) return;
-    warmedIds.add(videoId);
-    // Fire warm request to server so audio URL is pre-resolved & cached
-    fetch('/api/yt/warm?id=' + encodeURIComponent(videoId)).catch(() => {});
+  // ── 1. INSTANT QUEUE PRELOAD ENGINE (<0.5s GAPLESS PLAYBACK) ───────────────
+  // Automatically pre-resolves & buffers upcoming songs in the queue as soon
+  // as the queue is created, guaranteeing instantaneous (<0.5s) track playback
+  // on skips and auto-advances.
+  window.__auraStreamCache = window.__auraStreamCache || new Map();
+  let _shadowAudioPreloader = null;
+  let _activePreloadId = null;
+  let _queuePreloadTimer = null;
+  const _warmedQueueSet = new Set();
+
+  function getShadowPreloader() {
+    if (!_shadowAudioPreloader && typeof document !== 'undefined') {
+      _shadowAudioPreloader = document.createElement('audio');
+      _shadowAudioPreloader.preload = 'auto';
+      _shadowAudioPreloader.muted = true;
+      _shadowAudioPreloader.volume = 0;
+      _shadowAudioPreloader.setAttribute('playsinline', '');
+      _shadowAudioPreloader.style.display = 'none';
+      _shadowAudioPreloader.id = 'aura-shadow-preloader';
+      if (document.body) {
+        document.body.appendChild(_shadowAudioPreloader);
+      } else {
+        document.addEventListener('DOMContentLoaded', () => {
+          document.body.appendChild(_shadowAudioPreloader);
+        });
+      }
+    }
+    return _shadowAudioPreloader;
   }
 
-  // Pre-warm next songs from the queue whenever audio plays
-  window.addEventListener('play', function(e) {
-    if (e.target && e.target.tagName === 'AUDIO') {
-      // Warm next 3 songs in queue
+  function cleanVideoId(id) {
+    return String(id || '').replace(/^yt[-_]/, '').trim();
+  }
+
+  function normSongKey(name, artist) {
+    return `${(name || '').trim()}::${(artist || '').trim()}`.toLowerCase();
+  }
+
+  // Pre-resolve direct stream URL and pre-buffer into shadow audio element
+  async function preloadUpcomingSong(song, isNextImmediate = false) {
+    if (!song) return;
+    const vid = cleanVideoId(song.videoId || song.id);
+    const title = song.name || song.title || '';
+    const artist = song.artist || (song.artists?.primary?.[0]?.name) || '';
+    const key = normSongKey(title, artist);
+    const itemKey = vid || key;
+
+    let streamUrl = (vid && window.__auraStreamCache.get(vid)) ||
+                    (key && window.__auraStreamCache.get(key)) ||
+                    (song.id && window.__auraStreamCache.get(String(song.id)));
+
+    if (!streamUrl && itemKey && !_warmedQueueSet.has(itemKey)) {
+      _warmedQueueSet.add(itemKey);
       try {
-        const queue = JSON.parse(localStorage.getItem('auramusic_queue') || '[]');
-        const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
-        queue.slice(idx + 1, idx + 4).forEach(s => {
-          const v = s.videoId || (s.id && s.id.replace(/^yt[-_]/, ''));
-          if (v) warmVideoId(v);
+        const queryParams = new URLSearchParams({ json: '1' });
+        if (vid) queryParams.set('id', vid);
+        if (title) queryParams.set('title', title);
+        if (artist) queryParams.set('artist', artist);
+
+        const res = await fetch(`/api/yt/stream?${queryParams.toString()}`, {
+          signal: AbortSignal.timeout(4500)
         });
-      } catch {}
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.streamUrl) {
+            streamUrl = data.streamUrl;
+            if (vid) window.__auraStreamCache.set(vid, streamUrl);
+            if (song.id) window.__auraStreamCache.set(String(song.id), streamUrl);
+            if (key) window.__auraStreamCache.set(key, streamUrl);
+            window.__auraStreamCache.set(`/api/yt/stream?id=${vid}`, streamUrl);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Pre-warm server concurrently
+    if (vid) {
+      const warmParams = new URLSearchParams({ id: vid });
+      if (title) warmParams.set('title', title);
+      if (artist) warmParams.set('artist', artist);
+      fetch(`/api/yt/warm?${warmParams.toString()}`).catch(() => {});
+    }
+
+    // Shadow audio buffering: load audio container & initial chunks in background
+    if (streamUrl && isNextImmediate) {
+      if (_activePreloadId !== itemKey) {
+        _activePreloadId = itemKey;
+        const preloader = getShadowPreloader();
+        if (preloader) {
+          try {
+            preloader.src = streamUrl;
+            preloader.load();
+          } catch (_) {}
+        }
+        // Prefetch first 512KB chunk with high priority
+        try {
+          fetch(streamUrl, {
+            headers: { 'Range': 'bytes=0-524287' },
+            priority: 'high',
+            signal: AbortSignal.timeout(5000)
+          }).then(r => r.ok && r.arrayBuffer()).catch(() => {});
+        } catch (_) {}
+      }
+    }
+  }
+
+  // Master function triggered IMMEDIATELY whenever a queue is formed or changed
+  function triggerImmediateQueuePreload() {
+    clearTimeout(_queuePreloadTimer);
+    _queuePreloadTimer = setTimeout(() => {
+      try {
+        const queueRaw = localStorage.getItem('auramusic_queue');
+        if (!queueRaw) return;
+        const queue = JSON.parse(queueRaw);
+        if (!Array.isArray(queue) || queue.length === 0) return;
+
+        const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
+        const nextSong = queue[idx + 1];
+        const nextPlusOne = queue[idx + 2];
+
+        // 1. Immediately buffer the NEXT upcoming song (<0.5s playback target)
+        if (nextSong) {
+          preloadUpcomingSong(nextSong, true);
+        }
+
+        // 2. Resolve stream URL for the song after next in background
+        if (nextPlusOne) {
+          setTimeout(() => {
+            preloadUpcomingSong(nextPlusOne, false);
+          }, 350);
+        }
+      } catch (_) {}
+    }, 25);
+  }
+
+  // Intercept Storage.prototype.setItem so queue preload triggers the INSTANT queue is written
+  try {
+    const _origSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(k, v) {
+      _origSetItem.apply(this, arguments);
+      if (k === 'auramusic_queue' || k === 'auramusic_queue_index') {
+        triggerImmediateQueuePreload();
+      }
+    };
+  } catch (_) {}
+
+  // Storage listener across tabs/windows
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'auramusic_queue' || e.key === 'auramusic_queue_index') {
+      triggerImmediateQueuePreload();
+    }
+  });
+
+  // Track playback timeupdate: ensure next track is buffered when current song passes 50%
+  window.addEventListener('timeupdate', (e) => {
+    const a = e.target;
+    if (a && a.tagName === 'AUDIO' && a.duration > 0 && a.currentTime / a.duration > 0.45) {
+      if (!a._auraPreloadedNext) {
+        a._auraPreloadedNext = true;
+        triggerImmediateQueuePreload();
+      }
     }
   }, true);
+
+  // Play event: reset flag and trigger preload for new track
+  window.addEventListener('play', (e) => {
+    const a = e.target;
+    if (a && a.tagName === 'AUDIO' && a.id !== 'aura-shadow-preloader') {
+      a._auraPreloadedNext = false;
+      triggerImmediateQueuePreload();
+    }
+  }, true);
+
+  // Intercept HTMLMediaElement.prototype.src to instantly swap direct pre-buffered CDN URL!
+  try {
+    const _mediaSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (_mediaSrcDesc && _mediaSrcDesc.set) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        get: function() {
+          return _mediaSrcDesc.get.call(this);
+        },
+        set: function(val) {
+          let targetUrl = val;
+          if (this.id !== 'aura-shadow-preloader' && typeof val === 'string' && val.includes('/api/yt/stream')) {
+            const match = val.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+            const vid = match ? match[1].replace(/^yt[-_]/, '') : '';
+            const titleMatch = val.match(/[?&]title=([^&]+)/) || val.match(/[?&]q=([^&]+)/);
+            const artistMatch = val.match(/[?&]artist=([^&]+)/);
+            const title = titleMatch ? decodeURIComponent(titleMatch[1]) : '';
+            const artist = artistMatch ? decodeURIComponent(artistMatch[1]) : '';
+            const key = normSongKey(title, artist);
+
+            const cached = (vid && window.__auraStreamCache.get(vid)) ||
+                           (key && window.__auraStreamCache.get(key)) ||
+                           window.__auraStreamCache.get(val);
+
+            if (cached) {
+              targetUrl = cached;
+              console.log('[AuraInstant] ⚡ 0.5s Instant Playback Hit for:', vid || title);
+            }
+          }
+          return _mediaSrcDesc.set.call(this, targetUrl);
+        },
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (_) {}
+
+  // Hook window.fetch for /api/yt/stream json=1 to instantly return cached stream URL
+  try {
+    const _origFetch = window.fetch;
+    window.fetch = function(resource, init) {
+      if (typeof resource === 'string' && resource.includes('/api/yt/stream') && resource.includes('json=1')) {
+        const match = resource.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        const vid = match ? match[1].replace(/^yt[-_]/, '') : '';
+        if (vid && window.__auraStreamCache && window.__auraStreamCache.has(vid)) {
+          const streamUrl = window.__auraStreamCache.get(vid);
+          return Promise.resolve(new Response(JSON.stringify({ streamUrl: streamUrl, source: 'aura-instant-cache' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+      }
+      return _origFetch.apply(this, arguments);
+    };
+  } catch (_) {}
+
+  // Initial trigger in case queue already exists on page load
+  setTimeout(triggerImmediateQueuePreload, 300);
 
   // ── BUFFERING OPTIMIZER v3: <2s start, timeout fallback, background metadata ──
   const PLAY_TIMEOUT_MS = 2000;
