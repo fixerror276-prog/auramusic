@@ -2317,16 +2317,33 @@
     };
 
     // ────────────────────────────────────────────────────────────────────────
-    // G. INJECT TASTE DNA BUTTON INTO HEADER
+    // G. INJECT TASTE DNA BUTTON (ADMIN ONLY)
+    // Users ke liye taste engine silently background mein kaam karega to improve music.
+    // Dashboard & DNA UI button sirf Admin ko dikhega analytics monitor karne ke liye.
     // ────────────────────────────────────────────────────────────────────────
+    function isAdminUser() {
+      const u = getUser();
+      if (!u) return false;
+      const email = String(u.email || '').toLowerCase().trim();
+      const role = String(u.role || '').toLowerCase();
+      return email === 'admin@admin.com' || role === 'admin' || sessionStorage.getItem('auramusic_admin_logged') === 'true' || sessionStorage.getItem('auramusic_portal_unlocked') === 'true';
+    }
+
     function injectTasteHeaderButton() {
+      // Normal user ko nahi dikhana: user ka taste silently improve hoga
+      if (!isAdminUser()) {
+        const existing = document.getElementById('aura-header-dna-btn');
+        if (existing) existing.remove();
+        return;
+      }
+
       const headerActions = document.querySelector('header div[class*="flex items-center space-x"], header div[class*="flex items-center gap"]');
       if (headerActions && !document.getElementById('aura-header-dna-btn')) {
         const dnaBtn = document.createElement('button');
         dnaBtn.id = 'aura-header-dna-btn';
-        dnaBtn.title = 'View Music Taste DNA & Personalized Analytics';
+        dnaBtn.title = 'Admin Panel: View Users Taste DNA & Personalized Analytics';
         dnaBtn.className = 'px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600 hover:to-pink-600 border border-purple-500/40 text-purple-200 hover:text-white transition-all flex items-center space-x-1.5 shadow-sm';
-        dnaBtn.innerHTML = `<span>🧬</span><span class="hidden sm:inline">Taste DNA</span>`;
+        dnaBtn.innerHTML = `<span>🧬</span><span class="hidden sm:inline">Admin Taste DNA</span>`;
         dnaBtn.onclick = () => window.auraShowTasteDashboard();
         headerActions.insertBefore(dnaBtn, headerActions.firstChild);
       }
