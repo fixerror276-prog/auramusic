@@ -178,6 +178,44 @@ async function mochyInnerTubeExtract(clientCfg, id) {
   return { url: best.url, source: `innertube:${clientCfg.name}` };
 }
 
+// Mochy-Music InnerTube direct video extractor (MP4 360p/720p for Video Player Mode)
+export async function resolveVideo(id) {
+  const key = `video:${id}`;
+  const cached = getCached(key);
+  if (cached) return cached;
+
+  const extract = async (clientCfg) => {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': clientCfg.ua },
+      body: JSON.stringify({
+        videoId: id,
+        context: clientCfg.context,
+        contentCheckOk: true,
+        racyCheckOk: true
+      }),
+      signal: AbortSignal.timeout(4500)
+    });
+    if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
+    const data = await res.json();
+    const prog = (data.streamingData?.formats || []).filter(f => /video\/mp4/i.test(f.mimeType || '') && isHttpUrl(f.url));
+    const adaptive = (data.streamingData?.adaptiveFormats || []).filter(f => /video\/mp4/i.test(f.mimeType || '') && /avc1/i.test(f.mimeType || '') && isHttpUrl(f.url));
+    const pick = prog.sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+              || adaptive.filter(f => (f.height || 0) <= 720 && (f.height || 0) >= 360).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
+              || adaptive[0];
+    if (!pick) throw new Error('no video format');
+    return { streamUrl: pick.url, quality: pick.qualityLabel || `${pick.height || 360}p`, source: `innertube:${clientCfg.name}` };
+  };
+
+  try {
+    const found = await Promise.any(MOCHY_INNERTUBE_CLIENTS.map(c => extract(c)));
+    setCached(key, found, PORTABLE_TTL_MS);
+    return found;
+  } catch {
+    return null;
+  }
+}
+
 // Mochy InnerTube only — fastest (<300ms) unciphered audio streams.
 function portableExtract(id) {
   const attempts = MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id));

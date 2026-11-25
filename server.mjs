@@ -10,7 +10,7 @@ const ytAudioClient = new Ytdl({
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon, syncProfileToNeon, syncPlaylistLikeToNeon, syncSavedPlaylistToNeon, syncUserFollowToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
-import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
+import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 // Pure Mochy InnerTube Audio Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)
@@ -1628,6 +1628,35 @@ async function searchYouTube(query) {
           }
         }
         return sendJson(res, 500, { error: 'Failed to download stream' });
+      }
+
+      // Video stream endpoint for Mochy Fullscreen Video Player Mode
+      if (pathname === '/api/yt/video') {
+        const id = parsedUrl.searchParams.get('id') || '';
+        const cleanId = id.replace(/^yt_|^yt-/, '').trim();
+        if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
+        const clientIp = getClientIp(req);
+        const resolved = await resolveVideo(cleanId);
+        if (!resolved?.streamUrl) return sendJson(res, 404, { error: 'Video stream unavailable' });
+        if (parsedUrl.searchParams.get('json') === '1') {
+          return sendJson(res, 200, resolved);
+        }
+        if (urlWorksForClient(resolved.streamUrl, clientIp)) {
+          res.writeHead(307, {
+            'Location': resolved.streamUrl,
+            'Cache-Control': 'private, max-age=120',
+            'Access-Control-Allow-Origin': '*'
+          });
+          return res.end();
+        }
+        try {
+          const served = await proxyAudio(req, res, {
+            getUrl: () => Promise.resolve(resolved.streamUrl),
+            forget: () => {}
+          });
+          if (served) return;
+        } catch {}
+        return sendJson(res, 502, { error: 'Video proxy failed' });
       }
 
       if (pathname === '/api/yt/stream') {

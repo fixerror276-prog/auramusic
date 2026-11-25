@@ -348,7 +348,8 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // 3. MOCHY STUDIO MODAL (AudioLab, Skins, Sleep Timer, Charts, Storage)
   // ═══════════════════════════════════════════════════════════════════════════
-  let _activeTab = 'audiolab'; // 'audiolab' | 'skins' | 'explore' | 'storage' | 'live'
+  let _activeTab = 'settings'; // 'settings' | 'audiolab' | 'skins' | 'explore' | 'storage' | 'live'
+  let _settingsSearch = '';
 
   // ── Live System State ─────────────────────────────────────────────────────
   let _lyricsLines = [];           // [{time, text}]
@@ -358,7 +359,7 @@
   let _liveListenInterval = null;  // listener poll interval
   let _liveIsHost = false;
 
-  window.auraOpenMochyStudio = function(initialTab = 'audiolab') {
+  window.auraOpenMochyStudio = function(initialTab = 'settings') {
     _activeTab = initialTab;
     let modal = document.getElementById('aura-mochy-modal');
     if (!modal) {
@@ -383,11 +384,12 @@
     if (!modal) return;
 
     const tabs = [
-      { id: 'audiolab', label: '🎛️ AudioLab & FX' },
-      { id: 'skins', label: '🎨 Player Skins & Timer' },
-      { id: 'explore', label: '📊 Charts & Moods' },
-      { id: 'storage', label: '💾 Storage & About' },
-      { id: 'live', label: '🔴 Live' }
+      { id: 'settings', label: '⚙️ Settings' },
+      { id: 'audiolab', label: '🎛️ AudioLab' },
+      { id: 'skins', label: '🎨 Skins' },
+      { id: 'live', label: '🔴 Live' },
+      { id: 'explore', label: '📊 Charts' },
+      { id: 'storage', label: '💾 Storage' }
     ];
 
     modal.innerHTML = `
@@ -429,6 +431,99 @@
   function renderMochyTabContent() {
     const body = document.getElementById('aura-mochy-body');
     if (!body) return;
+
+    if (_activeTab === 'settings') {
+      const q = (_settingsSearch || '').toLowerCase().trim();
+      const items = [
+        {
+          id: 'audiolab',
+          title: 'Audio Lab',
+          sub: '5-Band EQ, Bass Boost, 8D Spatial & Speed',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M5 9h3v10H5zm5.5-5h3v15h-3zM16 12h3v7h-3z"/></svg>',
+          action: "window.auraSwitchMochyTab('audiolab')"
+        },
+        {
+          id: 'playback',
+          title: 'Playback',
+          sub: 'InnerTube AAC/Lossless, Sleep Timer & Speed',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+          action: "window.auraSwitchMochyTab('audiolab')"
+        },
+        {
+          id: 'nowplaying',
+          title: 'Now playing',
+          sub: 'Fullscreen Video Mode, Vinyl / iPod / Bedside Skins',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h10"/></svg>',
+          action: "window.auraOpenVideoPlayer()"
+        },
+        {
+          id: 'behaviour',
+          title: 'App behaviour',
+          sub: 'Live Lyrics Ticker, Reduced Blur & Animations',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+          action: "window.auraSwitchMochyTab('skins')"
+        },
+        {
+          id: 'customisation',
+          title: 'Customisation',
+          sub: 'Edit Profile, Gallery Photo & Share Card Studio',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22c4.97 0 9-4.03 9-9 0-4.97-4.03-9-9-9S3 8.03 3 13c0 2.76 2.24 5 5 5h1c1.1 0 2 .9 2 2 0 1.1.9 2 1 2z"/></svg>',
+          action: "window.auraOpenEditProfileFromMochy()"
+        },
+        {
+          id: 'storage',
+          title: 'Storage',
+          sub: 'Stream Cache, Clear Temporary Cache & Offline',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+          action: "window.auraSwitchMochyTab('storage')"
+        },
+        {
+          id: 'integrations',
+          title: 'Integrations',
+          sub: 'Live Listen Together Rooms & LRCLib Synced Lyrics',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6M12 16v6M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M16 12h6"/></svg>',
+          action: "window.auraSwitchMochyTab('live')"
+        },
+        {
+          id: 'device',
+          title: 'Device integration',
+          sub: 'MediaSession Lockscreen Controls & Background Audio',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h.01M12 12h.01"/></svg>',
+          action: "window.auraShowDeviceIntegration()"
+        }
+      ].filter(it => !q || it.title.toLowerCase().includes(q) || it.sub.toLowerCase().includes(q));
+
+      body.innerHTML = `
+        <div class="flex items-center gap-2.5">
+          <div class="flex-1 flex items-center gap-2.5 px-4 py-3 rounded-full bg-[#131722] border border-white/[0.08]">
+            <svg class="w-4 h-4 text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="mochy-settings-search" type="text" value="${_settingsSearch.replace(/"/g, '&quot;')}"
+              oninput="window.auraFilterMochySettings(this.value)"
+              placeholder="Search settings"
+              class="w-full bg-transparent text-sm text-white placeholder-slate-400 focus:outline-none" />
+          </div>
+          <button onclick="window.auraOpenEditProfileFromMochy()" title="Edit Profile" class="w-11 h-11 rounded-full bg-[#131722] border border-white/[0.08] flex items-center justify-center text-slate-300 hover:text-white cursor-pointer shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+          </button>
+        </div>
+
+        <div class="space-y-2.5" id="mochy-settings-list">
+          ${items.map(it => `
+            <button onclick="${it.action}" class="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-[#11141d] hover:bg-[#171c28] border border-white/[0.06] text-left transition-all cursor-pointer group">
+              <div class="w-10 h-10 rounded-full bg-white/[0.07] text-slate-200 flex items-center justify-center shrink-0 group-hover:bg-emerald-500/20 group-hover:text-emerald-400 transition-colors">
+                ${it.icon}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-bold text-white">${it.title}</div>
+                <div class="text-[11px] text-slate-400 truncate mt-0.5">${it.sub}</div>
+              </div>
+              <svg class="w-4 h-4 text-slate-500 group-hover:text-white shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          `).join('')}
+        </div>
+      `;
+      return;
+    }
 
     if (_activeTab === 'audiolab') {
       ensureAudioDsp();
@@ -1258,6 +1353,205 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // 5c. MOCHY SETTINGS HELPERS & FULLSCREEN SYNCED VIDEO PLAYER (SCREENSHOT 1-3)
+  // ═══════════════════════════════════════════════════════════════════════════
+  window.auraFilterMochySettings = function(val) {
+    _settingsSearch = val || '';
+    const cursorPos = document.getElementById('mochy-settings-search')?.selectionStart || _settingsSearch.length;
+    renderMochyTabContent();
+    const inp = document.getElementById('mochy-settings-search');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(cursorPos, cursorPos); } catch {} }
+  };
+
+  window.auraOpenEditProfileFromMochy = function() {
+    window.auraCloseMochyStudio();
+    if (typeof window.auraOpenEditProfileModal === 'function') {
+      window.auraOpenEditProfileModal();
+    } else if (typeof window.auraOpenCommunity === 'function') {
+      window.auraOpenCommunity();
+      setTimeout(() => {
+        if (typeof window.auraOpenEditProfileModal === 'function') window.auraOpenEditProfileModal();
+      }, 250);
+    } else {
+      toast('Open Profile tab to edit your profile');
+    }
+  };
+
+  window.auraShowDeviceIntegration = function() {
+    const hasMedia = 'mediaSession' in navigator;
+    toast(hasMedia ? '📱 Lockscreen & Background Media Controls: Active' : '📱 Standard Audio Output Active');
+  };
+
+  let _videoSyncTimer = null;
+  let _videoOverlayPage = 0; // 0 = Video Only, 1 = Video + Synced Lyrics, 2 = Track Info
+  window.auraCloseVideoPlayer = function() {
+    clearInterval(_videoSyncTimer);
+    _videoSyncTimer = null;
+    const ov = document.getElementById('aura-mochy-video-overlay');
+    if (ov) ov.remove();
+  };
+
+  window.auraOpenVideoPlayer = async function() {
+    const song = getCurrentSong();
+    if (!song || !song.videoId) {
+      return toast('Play a YouTube Music track first for Video Mode', 'error');
+    }
+    window.auraCloseMochyStudio();
+    window.auraCloseVideoPlayer();
+
+    const ov = document.createElement('div');
+    ov.id = 'aura-mochy-video-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:12500;background:#07080c;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;font-family:inherit;user-select:none;';
+    ov.innerHTML = `
+      <video id="aura-mochy-video-el" playsinline muted autoplay loop style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;"></video>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.45) 0%,rgba(0,0,0,0.05) 35%,rgba(7,8,12,0.88) 78%,rgba(7,8,12,0.98) 100%);pointer-events:none;"></div>
+      <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);width:48px;height:4px;border-radius:999px;background:rgba(255,255,255,0.38);"></div>
+      <div id="aura-video-status" style="position:absolute;top:28px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:800;color:rgba(255,255,255,0.75);background:rgba(0,0,0,0.45);padding:4px 12px;border-radius:999px;backdrop-filter:blur(8px);">Loading HD Video…</div>
+
+      <div id="aura-video-lyrics-box" style="display:none;position:relative;z-index:2;padding:0 24px 16px;text-align:center;">
+        <div id="aura-video-lyric-cur" style="font-size:18px;font-weight:900;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,0.8);"></div>
+        <div id="aura-video-lyric-next" style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.55);margin-top:4px;"></div>
+      </div>
+
+      <div style="position:relative;z-index:2;padding:20px 22px 26px;space-y:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <h2 id="aura-vid-title" style="margin:0;font-size:20px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(song.name || song.title || 'Track').replace(/</g, '&lt;')}</h2>
+              <span style="font-size:10px;font-weight:800;color:rgba(255,255,255,0.8);border:1px solid rgba(255,255,255,0.35);padding:1px 6px;border-radius:6px;flex-shrink:0;">AAC</span>
+            </div>
+            <p id="aura-vid-artist" style="margin:3px 0 0;font-size:13px;color:rgba(255,255,255,0.68);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(song.artist || 'Artist').replace(/</g, '&lt;')}</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <button onclick="document.querySelector('button[title*=Like i],button[aria-label*=Like i]')?.click()" style="width:38px;height:38px;border-radius:999px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.15);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
+            <button onclick="window.auraCloseVideoPlayer()" title="Minimize Video" style="width:38px;height:38px;border-radius:999px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.15);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <input id="aura-vid-seek" type="range" min="0" max="100" value="0" style="width:100%;accent-color:#fff;height:4px;cursor:pointer;" />
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.65);margin-top:4px;font-variant-numeric:tabular-nums;">
+            <span id="aura-vid-cur">0:00</span>
+            <span id="aura-vid-dur">0:00</span>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:center;gap:42px;margin-top:16px;">
+          <button onclick="document.querySelector('button[title*=Previous i],button[aria-label*=Previous i]')?.click()" style="background:none;border:none;color:#fff;cursor:pointer;padding:8px;">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z"/></svg>
+          </button>
+          <button id="aura-vid-playbtn" style="background:none;border:none;color:#fff;cursor:pointer;padding:8px;">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button onclick="document.querySelector('button[title*=Next i],button[aria-label*=Next i]')?.click()" style="background:none;border:none;color:#fff;cursor:pointer;padding:8px;">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+          </button>
+        </div>
+
+        <div id="aura-vid-dots" onclick="window.auraCycleVideoPage()" style="margin:18px auto 0;padding:8px 14px;border-radius:14px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);display:flex;align-items:center;gap:6px;width:fit-content;cursor:pointer;">
+          <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-white/35"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-white/35"></span>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    const vEl = document.getElementById('aura-mochy-video-el');
+    const seekEl = document.getElementById('aura-vid-seek');
+    const playBtn = document.getElementById('aura-vid-playbtn');
+    const statusEl = document.getElementById('aura-video-status');
+    const fmt = (sec) => {
+      sec = Math.max(0, Math.floor(sec || 0));
+      return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60);
+    };
+
+    window.auraCycleVideoPage = function() {
+      _videoOverlayPage = (_videoOverlayPage + 1) % 3;
+      const lyrBox = document.getElementById('aura-video-lyrics-box');
+      if (lyrBox) lyrBox.style.display = _videoOverlayPage === 1 ? 'block' : 'none';
+      if (_videoOverlayPage === 1 && !_lyricsLines.length) window.auraStartLiveLyrics();
+      const dots = document.querySelectorAll('#aura-vid-dots span');
+      dots.forEach((d, idx) => { d.className = idx === _videoOverlayPage ? 'w-1.5 h-1.5 rounded-full bg-white' : 'w-1.5 h-1.5 rounded-full bg-white/35'; });
+    };
+
+    playBtn.onclick = () => {
+      const au = getMainAudio();
+      if (!au) return;
+      if (au.paused) { au.play().catch(() => {}); vEl.play().catch(() => {}); }
+      else { au.pause(); vEl.pause(); }
+    };
+
+    seekEl.oninput = () => {
+      const au = getMainAudio();
+      if (au && au.duration) {
+        const target = (parseFloat(seekEl.value) / 100) * au.duration;
+        au.currentTime = target;
+        if (vEl.readyState >= 2) vEl.currentTime = target;
+      }
+    };
+
+    // Load Mochy InnerTube Video stream
+    const vidSrc = '/api/yt/video?id=' + encodeURIComponent(song.videoId.replace(/^yt_/, ''));
+    vEl.src = vidSrc;
+    vEl.oncanplay = () => {
+      if (statusEl) statusEl.style.display = 'none';
+      const au = getMainAudio();
+      if (au) {
+        try { vEl.currentTime = au.currentTime; } catch {}
+        if (!au.paused) vEl.play().catch(() => {});
+      }
+    };
+    vEl.onerror = () => {
+      if (statusEl) statusEl.textContent = 'Video unavailable — Audio Mode';
+    };
+
+    let lastVidId = song.videoId;
+    _videoSyncTimer = setInterval(() => {
+      const au = getMainAudio();
+      const cur = getCurrentSong();
+      if (cur && cur.videoId && cur.videoId !== lastVidId) {
+        lastVidId = cur.videoId;
+        document.getElementById('aura-vid-title').textContent = cur.name || cur.title || 'Track';
+        document.getElementById('aura-vid-artist').textContent = cur.artist || 'Artist';
+        vEl.src = '/api/yt/video?id=' + encodeURIComponent(cur.videoId.replace(/^yt_/, ''));
+      }
+      if (!au) return;
+      if (au.duration && isFinite(au.duration)) {
+        seekEl.value = (au.currentTime / au.duration) * 100;
+        document.getElementById('aura-vid-cur').textContent = fmt(au.currentTime);
+        document.getElementById('aura-vid-dur').textContent = fmt(au.duration);
+      }
+      playBtn.innerHTML = au.paused
+        ? '<svg width="44" height="44" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'
+        : '<svg width="44" height="44" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+
+      if (vEl.readyState >= 2) {
+        if (au.paused && !vEl.paused) vEl.pause();
+        else if (!au.paused && vEl.paused) vEl.play().catch(() => {});
+        if (Math.abs(vEl.currentTime - au.currentTime) > 0.6) {
+          try { vEl.currentTime = au.currentTime; } catch {}
+        }
+      }
+      if (_videoOverlayPage === 1 && _lyricsLines.length) {
+        const t = au.currentTime + (settings.lyricsOffsetSec || 0);
+        let ci = -1;
+        for (let i = 0; i < _lyricsLines.length; i++) {
+          if (_lyricsLines[i].time <= t) ci = i; else break;
+        }
+        const cEl = document.getElementById('aura-video-lyric-cur');
+        const nEl = document.getElementById('aura-video-lyric-next');
+        if (cEl) cEl.textContent = ci >= 0 ? _lyricsLines[ci].text : '';
+        if (nEl) nEl.textContent = ci >= 0 && _lyricsLines[ci + 1] ? _lyricsLines[ci + 1].text : '';
+      }
+    }, 350);
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // 6. SIDEBAR / 3-LINE MENU INJECTION & VINYL SKIN SYNC
   // ═══════════════════════════════════════════════════════════════════════════
   function injectMochyNav() {
@@ -1276,7 +1570,7 @@
       btn.onclick = () => {
         const mobileOverlay = btn.closest('.fixed.inset-0');
         if (mobileOverlay) mobileOverlay.click();
-        window.auraOpenMochyStudio('audiolab');
+        window.auraOpenMochyStudio('settings');
       };
       sidebarNav.appendChild(btn);
 
@@ -1299,17 +1593,39 @@
       }
     });
 
-    // Apply Vinyl Turntable spin to fullscreen player cover if selected
-    const fullCover = document.querySelector('div[class*="z-50 bg-[#07080c]"] img.rounded-3xl, div[class*="z-50 bg-[#07080c]"] img.rounded-2xl');
-    if (fullCover) {
-      const a = getMainAudio();
-      if (settings.playerStyle === 'vinyl') {
-        fullCover.classList.add('aura-vinyl-spin');
-        fullCover.classList.toggle('aura-vinyl-paused', !a || a.paused);
-      } else {
-        fullCover.classList.remove('aura-vinyl-spin', 'aura-vinyl-paused');
+    // Apply Vinyl Turntable spin & inject Video Mode pill in fullscreen player
+    const fullPlayer = document.querySelector('div[class*="z-50 bg-[#07080c]"]');
+    if (fullPlayer) {
+      if (!fullPlayer.querySelector('.aura-mochy-video-pill')) {
+        const vBtn = document.createElement('button');
+        vBtn.className = 'aura-mochy-video-pill fixed top-4 right-16 z-[55] px-3 py-1.5 rounded-full bg-white/10 hover:bg-emerald-500/25 border border-white/15 text-white text-xs font-bold flex items-center gap-1.5 backdrop-blur-md cursor-pointer';
+        vBtn.innerHTML = '<span>🎬</span><span>Video</span>';
+        vBtn.onclick = (e) => { e.stopPropagation(); window.auraOpenVideoPlayer(); };
+        fullPlayer.appendChild(vBtn);
+      }
+      const fullCover = fullPlayer.querySelector('img.rounded-3xl, img.rounded-2xl');
+      if (fullCover) {
+        const a = getMainAudio();
+        if (settings.playerStyle === 'vinyl') {
+          fullCover.classList.add('aura-vinyl-spin');
+          fullCover.classList.toggle('aura-vinyl-paused', !a || a.paused);
+        } else {
+          fullCover.classList.remove('aura-vinyl-spin', 'aura-vinyl-paused');
+        }
       }
     }
+
+    // Inject Mochy Settings Hub button on Profile page (Screenshot 3 style)
+    const logoutBtns = Array.from(document.querySelectorAll('button')).filter(b => /logout/i.test(b.textContent || ''));
+    logoutBtns.forEach(lb => {
+      const card = lb.parentElement;
+      if (!card || card.querySelector('.aura-mochy-profile-settings-btn')) return;
+      const sBtn = document.createElement('button');
+      sBtn.className = 'aura-mochy-profile-settings-btn mt-3 w-full max-w-xs mx-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-extrabold cursor-pointer transition-all';
+      sBtn.innerHTML = '<span>⚙️</span><span>Settings, AudioLab, Video & Live</span>';
+      sBtn.onclick = () => window.auraOpenMochyStudio('settings');
+      card.appendChild(sBtn);
+    });
   }
 
   // Auto-close Mochy Studio when tapping bottom nav or header
