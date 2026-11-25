@@ -13,7 +13,7 @@ import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fi
 import { resolveAudio, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
-import { resolveFastAudio, resolveSaavnAudio, searchSongsSaavnDev } from './fast_audio.mjs';
+// Pure Mochy InnerTube Audio Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)
 import { recordTaste, buildDNA, processDailyDecay, getContext, forYou, generateAutoPlaylists, getMoodRecommendations, getUserDashboardAnalytics, clearUserTasteData, toSong } from './taste.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1005,17 +1005,7 @@ async function trendingIndian() {
     }
   }
   if (out.length) {
-    // Fast enrich top 30 trending songs with direct 320kbps CDN stream URLs for <1.5s instant playback
-    await Promise.all(out.slice(0, 30).map(async song => {
-      try {
-        const fast = await resolveSaavnAudio(song.name, song.artist);
-        if (fast?.streamUrl) {
-          song.streamUrl = fast.streamUrl;
-          song.url = fast.streamUrl;
-          song.source = 'AuraMusic Lossless 320k';
-        }
-      } catch (_) {}
-    }));
+    warmAudio(ytAudioClient, out.slice(0, 6).map(s => s.videoId));
     trendingCache = { at: Date.now(), data: out };
   }
   return out;
@@ -1227,17 +1217,13 @@ async function searchYouTube(query) {
   return songs;
 }
 
-      // ============================================================================
-      // Fast Saavn.dev Search API Endpoint: /api/search/songs?query={NAME}&limit=10
-      // Returns exact saavn.dev format: response.data.results[n].downloadUrl[last].url
-      // With pipedapi.kavin.rocks fallback
-      // ============================================================================
+      // Mochy YT Music Search API Endpoint: /api/search/songs?query={NAME}&limit=10
       if (pathname === '/api/search/songs') {
         const query = parsedUrl.searchParams.get('query') || parsedUrl.searchParams.get('q') || '';
         const limit = parseInt(parsedUrl.searchParams.get('limit') || '10', 10);
-        const data = await searchSongsSaavnDev(query, limit);
-        res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
-        return sendJson(res, 200, data);
+        const results = (await searchYTMusicInnerTube(query).catch(() => [])).slice(0, limit);
+        res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
+        return sendJson(res, 200, { success: true, data: { results } });
       }
 
       // App Proxy / Search / Lyrics / Playlists APIs (Preserving existing website features)
@@ -1585,18 +1571,7 @@ async function searchYouTube(query) {
         }
 
         const queue = pool.slice(0, limit).map(toSong);
-
-        // Fast enrich next songs with direct 320k Saavn CDN streamUrls
-        await Promise.all(queue.slice(0, 5).map(async song => {
-          try {
-            const fast = await resolveSaavnAudio(song.name, song.artist);
-            if (fast?.streamUrl) {
-              song.streamUrl = fast.streamUrl;
-              song.url = fast.streamUrl;
-              song.source = 'AuraMusic Lossless 320k';
-            }
-          } catch (_) {}
-        }));
+        warmAudio(ytAudioClient, queue.slice(0, 4).map(s => s.videoId));
 
         return sendJson(res, 200, {
           status: 'success',
@@ -1627,16 +1602,9 @@ async function searchYouTube(query) {
         const safeFilename = `${qTitle.replace(/[/\\?%*:|"<>]/g, '')} - ${qArtist.replace(/[/\\?%*:|"<>]/g, '')}.mp3`;
 
         let streamUrl = null;
-        try {
-          const fast = await resolveFastAudio(cleanId, qTitle, qArtist);
-          if (fast?.streamUrl) streamUrl = fast.streamUrl;
-        } catch (_) {}
-
-        if (!streamUrl) {
-          const clientIp = getClientIp(req);
-          const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
-          if (resolved?.streamUrl) streamUrl = resolved.streamUrl;
-        }
+        const clientIp = getClientIp(req);
+        const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
+        if (resolved?.streamUrl) streamUrl = resolved.streamUrl;
 
         if (streamUrl) {
           try {
@@ -2678,7 +2646,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/taste/auto-playlists' && req.method === 'GET') {
         const userId = parsedUrl.searchParams.get('userId') || 'guest';
         const searchFn = async (q) => {
-          const r = await searchSongsSaavnDev(q).catch(() => []);
+          const r = await searchYTMusicInnerTube(q).catch(() => []);
           return r || [];
         };
         const playlists = await generateAutoPlaylists(memoryDb, userId, searchFn);
@@ -2691,7 +2659,7 @@ async function searchYouTube(query) {
         const userId = parsedUrl.searchParams.get('userId') || 'guest';
         const mood = (parsedUrl.searchParams.get('mood') || 'chill').toLowerCase();
         const searchFn = async (q) => {
-          const r = await searchSongsSaavnDev(q).catch(() => []);
+          const r = await searchYTMusicInnerTube(q).catch(() => []);
           return r || [];
         };
         const songs = await getMoodRecommendations(memoryDb, userId, mood, searchFn);
@@ -2892,16 +2860,10 @@ async function searchYouTube(query) {
       }
 
       // ─── Stream warm-up endpoint ─────────────────────────────────────────
-      // GET /api/yt/warm?id=VIDEOID&title=...&artist=...  - pre-resolve audio URL and cache it
+      // GET /api/yt/warm?id=VIDEOID - pre-resolve audio URL via Mochy InnerTube and cache it
       if (pathname === '/api/yt/warm' && req.method === 'GET') {
         const videoId = (parsedUrl.searchParams.get('id') || '').replace(/^yt[-_]/, '').trim();
-        const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || '';
-        const qArtist = parsedUrl.searchParams.get('artist') || '';
         if (videoId) {
-          if (qTitle) {
-            resolveFastAudio(videoId, qTitle, qArtist).catch(() => {});
-          }
-          // Race ytdl + Piped/Invidious simultaneously, cache both results
           warmAudio(ytAudioClient, [videoId]);
         }
         return sendJson(res, 200, { success: true });
@@ -3141,7 +3103,7 @@ async function searchYouTube(query) {
             }))
           },
           audioEngine: {
-            primaryTier: 'JioSaavn 320kbps HD CDN (<250ms stream resolution)',
+            primaryTier: 'Mochy InnerTube Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)',
             fallbackTier: 'Piped & Invidious Audio Extraction + ytdl-core',
             bufferingOptimizer: 'ACTIVE (Pre-warm next 3 songs + 2s timeout fallback)',
             downloadSystem: 'ACTIVE (/api/yt/download direct MP3 streamer)'

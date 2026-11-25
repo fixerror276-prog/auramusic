@@ -178,14 +178,10 @@ async function mochyInnerTubeExtract(clientCfg, id) {
   return { url: best.url, source: `innertube:${clientCfg.name}` };
 }
 
-// First instance that answers wins.
+// Mochy InnerTube only — fastest (<300ms) unciphered audio streams.
 function portableExtract(id) {
-  const attempts = [
-    ...MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id)),
-    ...PIPED_INSTANCES.map(i => pipedExtract(i, id)),
-    ...INVIDIOUS_INSTANCES.map(i => invidiousExtract(i, id))
-  ];
-  if (!attempts.length) return Promise.reject(new Error('no fallback instances configured'));
+  const attempts = MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id));
+  if (!attempts.length) return Promise.reject(new Error('no innertube clients configured'));
   return Promise.any(attempts);
 }
 
@@ -264,44 +260,30 @@ function firstUseful(promises) {
   });
 }
 
-// Fills the caches ahead of time so the first tap on a song is instant. Never throws.
+// Fills the caches ahead of time using Mochy InnerTube so the first tap on a song is instant.
 export function warmAudio(client, ids) {
   for (const id of ids) {
     if (!id) continue;
-    getYtdlUrl(client, id).catch(() => {});
     getPortable(id).catch(() => {});
   }
 }
 
 // Returns { streamUrl, source } or null.
-// Race ytdl + ALL Piped/Invidious simultaneously – whichever resolves first wins.
-// This guarantees the fastest possible response regardless of which source is healthy.
+// Primary: Mochy InnerTube (ANDROID_VR & IOS). Backup: ytdl only if InnerTube fails.
 export async function resolveAudio(client, id, clientIp) {
   const cached_portable = getCached(`portable:${id}`);
   if (cached_portable) {
     return { streamUrl: cached_portable.url, source: cached_portable.source };
   }
-  const cached_ytdl = getCached(`ytdl:${id}`);
-  if (cached_ytdl && urlWorksForClient(cached_ytdl, clientIp)) {
-    return { streamUrl: cached_ytdl, source: 'ytdl' };
-  }
 
-  // Fire ALL sources at once — first useful URL wins
-  const ytdlResult = getYtdlUrl(client, id).then(url => {
-    if (url && urlWorksForClient(url, clientIp)) return { streamUrl: url, source: 'ytdl' };
-    return null;
-  }).catch(() => null);
+  try {
+    const p = await getPortable(id);
+    if (p?.url) return { streamUrl: p.url, source: p.source };
+  } catch (_) {}
 
-  const portableResult = getPortable(id).then(p =>
-    p ? { streamUrl: p.url, source: p.source } : null
-  ).catch(() => null);
-
-  const winner = await firstUseful([portableResult, ytdlResult]);
-  if (winner) return winner;
-
-  // Last resort: ytdl URL even if IP-locked (better than nothing)
-  const ytdlUrl = await getCached(`ytdl:${id}`) || await getYtdlUrl(client, id).catch(() => null);
-  if (ytdlUrl) return { streamUrl: ytdlUrl, source: 'ytdl-ip-mismatch' };
+  // Emergency fallback only if InnerTube fails
+  const ytdlUrl = getCached(`ytdl:${id}`) || await getYtdlUrl(client, id).catch(() => null);
+  if (ytdlUrl) return { streamUrl: ytdlUrl, source: urlWorksForClient(ytdlUrl, clientIp) ? 'ytdl' : 'ytdl-ip-mismatch' };
   return null;
 }
 
