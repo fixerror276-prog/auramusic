@@ -82,10 +82,12 @@
     const title = song.name || song.title || '';
     const artist = song.artist || (song.artists?.primary?.[0]?.name) || '';
     const key = normSongKey(title, artist);
-    const itemKey = vid || key;
+    const titleOnlyKey = title ? title.split('|')[0].replace(/\(.*?\)|\[.*?\]/g, '').trim().toLowerCase() : '';
+    const itemKey = vid || key || titleOnlyKey;
 
     let streamUrl = (vid && window.__auraStreamCache.get(vid)) ||
                     (key && window.__auraStreamCache.get(key)) ||
+                    (titleOnlyKey && window.__auraStreamCache.get(titleOnlyKey)) ||
                     (song.id && window.__auraStreamCache.get(String(song.id)));
 
     if (!streamUrl && itemKey && !_warmedQueueSet.has(itemKey)) {
@@ -103,10 +105,14 @@
           const data = await res.json();
           if (data && data.streamUrl) {
             streamUrl = data.streamUrl;
-            if (vid) window.__auraStreamCache.set(vid, streamUrl);
+            if (vid) {
+              window.__auraStreamCache.set(vid, streamUrl);
+              window.__auraStreamCache.set('yt_' + vid, streamUrl);
+              window.__auraStreamCache.set(`/api/yt/stream?id=${vid}`, streamUrl);
+            }
             if (song.id) window.__auraStreamCache.set(String(song.id), streamUrl);
             if (key) window.__auraStreamCache.set(key, streamUrl);
-            window.__auraStreamCache.set(`/api/yt/stream?id=${vid}`, streamUrl);
+            if (titleOnlyKey) window.__auraStreamCache.set(titleOnlyKey, streamUrl);
           }
         }
       } catch (_) {}
@@ -120,25 +126,26 @@
       fetch(`/api/yt/warm?${warmParams.toString()}`).catch(() => {});
     }
 
-    // Shadow audio buffering: load audio container & initial chunks in background
+    // Shadow audio buffering: muted play -> immediate pause forces mobile browsers to buffer actual audio frames!
     if (streamUrl && isNextImmediate) {
       if (_activePreloadId !== itemKey) {
         _activePreloadId = itemKey;
         const preloader = getShadowPreloader();
         if (preloader) {
           try {
+            preloader.muted = true;
+            preloader.volume = 0;
             preloader.src = streamUrl;
             preloader.load();
+            const onReadyToBuffer = () => {
+              preloader.pause();
+              try { preloader.currentTime = 0; } catch (_) {}
+            };
+            preloader.addEventListener('playing', onReadyToBuffer, { once: true });
+            const p = preloader.play();
+            if (p && p.catch) p.catch(() => {});
           } catch (_) {}
         }
-        // Prefetch first 512KB chunk with high priority
-        try {
-          fetch(streamUrl, {
-            headers: { 'Range': 'bytes=0-524287' },
-            priority: 'high',
-            signal: AbortSignal.timeout(5000)
-          }).then(r => r.ok && r.arrayBuffer()).catch(() => {});
-        } catch (_) {}
       }
     }
   }
@@ -156,20 +163,16 @@
         const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
         const nextSong = queue[idx + 1];
         const nextPlusOne = queue[idx + 2];
+        const nextPlusTwo = queue[idx + 3];
 
-        // 1. Immediately buffer the NEXT upcoming song (<0.5s playback target)
-        if (nextSong) {
-          preloadUpcomingSong(nextSong, true);
-        }
+        // 1. Immediately buffer the NEXT upcoming song (<1s playback target)
+        if (nextSong) preloadUpcomingSong(nextSong, true);
 
-        // 2. Resolve stream URL for the song after next in background
-        if (nextPlusOne) {
-          setTimeout(() => {
-            preloadUpcomingSong(nextPlusOne, false);
-          }, 350);
-        }
+        // 2. Pre-resolve stream URLs for next+1 and next+2 in background
+        if (nextPlusOne) setTimeout(() => preloadUpcomingSong(nextPlusOne, false), 200);
+        if (nextPlusTwo) setTimeout(() => preloadUpcomingSong(nextPlusTwo, false), 450);
       } catch (_) {}
-    }, 25);
+    }, 15);
   }
 
   // Intercept Storage.prototype.setItem so queue preload triggers the INSTANT queue is written
@@ -228,9 +231,11 @@
             const title = titleMatch ? decodeURIComponent(titleMatch[1]) : '';
             const artist = artistMatch ? decodeURIComponent(artistMatch[1]) : '';
             const key = normSongKey(title, artist);
+            const titleOnlyKey = title ? title.split('|')[0].replace(/\(.*?\)|\[.*?\]/g, '').trim().toLowerCase() : '';
 
             const cached = (vid && window.__auraStreamCache.get(vid)) ||
                            (key && window.__auraStreamCache.get(key)) ||
+                           (titleOnlyKey && window.__auraStreamCache.get(titleOnlyKey)) ||
                            window.__auraStreamCache.get(val);
 
             if (cached) {

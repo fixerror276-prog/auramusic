@@ -152,9 +152,11 @@ export async function searchSongsSaavnDev(query, limit = 10) {
 export async function resolveSaavnAudio(title, artist = '') {
   if (!title) return null;
   const cleanTitle = title
+    .split('|')[0]
     .replace(/\(Official.*?\)/ig, '')
     .replace(/\[Official.*?\]/ig, '')
-    .replace(/\|\s*Official.*?$/ig, '')
+    .replace(/\(Lyric.*?\)/ig, '')
+    .replace(/\[Lyric.*?\]/ig, '')
     .replace(/\b(Video|Audio|Song|Full Song|HD|4K|Lyrics|Lyrical)\b/ig, '')
     .trim();
 

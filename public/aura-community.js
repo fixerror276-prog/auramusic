@@ -123,6 +123,34 @@
     .aura-crop-canvas-box:active {
       cursor: grabbing;
     }
+    /* Solid opaque dark background for Community & Detail overlays so nothing bleeds through */
+    #aura-community-modal, #aura-creator-profile-modal, #aura-pl-detail-modal {
+      background: #07080c !important;
+      z-index: 25 !important;
+      top: 0;
+      bottom: 64px; /* Keep bottom navigation bar always visible & clickable! */
+    }
+    @media (min-width: 768px) {
+      #aura-community-modal, #aura-creator-profile-modal, #aura-pl-detail-modal {
+        bottom: 0;
+        z-index: 45 !important;
+      }
+    }
+    /* Force 2-column pair grid on mobile in Your Library */
+    @media (max-width: 639px) {
+      main .grid.grid-cols-1.sm\\:grid-cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 0.75rem !important;
+      }
+      main .grid.grid-cols-1.sm\\:grid-cols-2 > div {
+        padding: 0.85rem !important;
+        border-radius: 1.25rem !important;
+      }
+      main .grid.grid-cols-1.sm\\:grid-cols-2 h2 {
+        font-size: 1rem !important;
+        line-height: 1.25rem !important;
+      }
+    }
     /* Prevent profile photo zooming anywhere in the application */
     img[src*="/avatars/"], .aura-profile-avatar-img {
       pointer-events: auto;
@@ -177,7 +205,8 @@
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'aura-community-modal';
-      modal.className = 'fixed inset-0 z-[9999] bg-[#07080c]/98 backdrop-blur-2xl text-slate-100 flex flex-col overflow-hidden animate-fadeIn select-none font-sans';
+      modal.style.background = '#07080c';
+      modal.className = 'fixed inset-x-0 top-0 bottom-16 md:bottom-0 z-[25] md:z-[45] text-slate-100 flex flex-col overflow-hidden animate-fadeIn select-none font-sans';
       document.body.appendChild(modal);
     }
     modal.style.display = 'flex';
@@ -332,7 +361,7 @@
               <span class="text-xs text-slate-500">Most loved by community</span>
             </div>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             ${trending.map(pl => renderPlaylistCard(pl)).join('')}
           </div>
         </section>
@@ -349,7 +378,7 @@
               <span class="text-xs text-slate-500">Fresh public drops</span>
             </div>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             ${recentlyAdded.map(pl => renderPlaylistCard(pl)).join('')}
           </div>
         </section>
@@ -409,7 +438,7 @@
       html += `
         <section class="space-y-4">
           <h2 class="text-lg font-black text-white">Playlists (${playlists.length})</h2>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             ${playlists.map(pl => renderPlaylistCard(pl)).join('')}
           </div>
         </section>
@@ -432,70 +461,68 @@
   // ═══════════════════════════════════════════════════════════════════════════
   function renderPlaylistCard(pl) {
     const creator = pl.creator || {};
-    const coverUrl = pl.coverUrl || pl.songs?.[0]?.image || '/logo.png';
+    const coverUrl = (pl.coverUrl && pl.coverUrl !== '/logo.png' ? pl.coverUrl : '') || (pl.cover && pl.cover !== '/logo.png' ? pl.cover : '') || pl.songs?.[0]?.image || '/logo.png';
     const isLiked = Boolean(pl.isLiked);
     const isSaved = Boolean(pl.isSaved);
     const songsCount = pl.songs?.length || 0;
     const likesCount = pl.likesCount || 0;
 
     return `
-      <div class="aura-community-card group" data-playlist-id="${pl.id}">
+      <div class="aura-community-card group !p-2.5 sm:!p-4" data-playlist-id="${pl.id}">
         <!-- Cover Art (First Song Thumbnail or Gallery Cover) & Quick Play Button -->
-        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 mb-3.5 cursor-pointer">
-          <img src="${coverUrl}" alt="${pl.name}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="relative w-full aspect-square sm:aspect-video rounded-xl overflow-hidden bg-slate-900 mb-2.5 cursor-pointer">
+          <img src="${coverUrl}" alt="${pl.name}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" />
           <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80"></div>
           
           <!-- Visibility Badge -->
-          <div class="absolute top-2.5 left-2.5">
-            <span class="aura-community-badge aura-badge-public">
-              <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>
-              PUBLIC
+          <div class="absolute top-1.5 left-1.5 sm:top-2.5 sm:left-2.5">
+            <span class="aura-community-badge aura-badge-public !text-[9px] !px-1.5 !py-0.5">
+              🌐 PUBLIC
             </span>
           </div>
 
           <!-- Play Button Overlay -->
-          <button onclick="event.stopPropagation(); window.auraPlayCommunityPlaylist('${pl.id}')" class="absolute bottom-2.5 right-2.5 w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl shadow-emerald-500/30 transition-transform hover:scale-110 active:scale-95 cursor-pointer" title="Play Playlist">
-            <svg class="w-5 h-5 ml-0.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <button onclick="event.stopPropagation(); window.auraPlayCommunityPlaylist('${pl.id}')" class="absolute bottom-2 right-2 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl shadow-emerald-500/30 transition-transform hover:scale-110 active:scale-95 cursor-pointer" title="Play Playlist">
+            <svg class="w-4 h-4 sm:w-5 sm:h-5 ml-0.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           </button>
         </div>
 
         <!-- Playlist Title & Song Count (Tap to view songs & creator profile) -->
-        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="flex-1 space-y-1 mb-3 cursor-pointer">
-          <h3 class="font-bold text-white text-base leading-snug line-clamp-1 group-hover:text-emerald-400 transition-colors" title="${pl.name}">
+        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="flex-1 space-y-0.5 mb-2 cursor-pointer">
+          <h3 class="font-bold text-white text-xs sm:text-base leading-snug line-clamp-1 group-hover:text-emerald-400 transition-colors" title="${pl.name}">
             ${pl.name}
           </h3>
-          <p class="text-xs text-slate-400 line-clamp-1">${pl.description || `${songsCount} audio tracks`}</p>
+          <p class="text-[10px] sm:text-xs text-slate-400 line-clamp-1">${songsCount} tracks</p>
         </div>
 
         <!-- Creator Profile Row (Clickable to open profile!) -->
-        <div class="flex items-center justify-between py-2 border-t border-white/[0.06] mb-3">
-          <div onclick="window.auraOpenCreatorProfile('${creator.userId}')" class="flex items-center space-x-2 cursor-pointer hover:opacity-85 transition-opacity" title="View ${creator.displayName}'s profile">
-            <img src="${creator.avatar || '/avatars/p1.jpg'}" alt="${creator.displayName}" class="w-6 h-6 rounded-full object-cover ring-1 ring-emerald-500/30 bg-slate-900" />
-            <div class="text-xs leading-none">
-              <div class="font-bold text-slate-200 line-clamp-1">${creator.displayName}</div>
-              <div class="text-[10px] text-slate-500">@${creator.username}</div>
+        <div class="flex items-center justify-between py-1.5 border-t border-white/[0.06] mb-2">
+          <div onclick="event.stopPropagation(); window.auraOpenCreatorProfile('${creator.userId}')" class="flex items-center space-x-1.5 cursor-pointer hover:opacity-85 transition-opacity min-w-0" title="View ${creator.displayName}'s profile">
+            <img src="${creator.avatar || '/avatars/p1.jpg'}" alt="${creator.displayName}" class="w-5 h-5 sm:w-6 sm:h-6 rounded-full object-cover ring-1 ring-emerald-500/30 bg-slate-900 shrink-0" />
+            <div class="text-[10px] sm:text-xs leading-none truncate">
+              <div class="font-bold text-slate-200 truncate">${creator.displayName}</div>
+              <div class="text-[9px] sm:text-[10px] text-slate-500 truncate">@${creator.username}</div>
             </div>
           </div>
-          <span class="text-[11px] font-semibold text-slate-400 bg-white/[0.04] px-2 py-0.5 rounded-md">${songsCount} Songs</span>
         </div>
 
         <!-- Action Buttons: Like, Save, Share -->
-        <div class="flex items-center justify-between pt-1">
+        <div class="flex items-center justify-between gap-1 pt-0.5">
           <!-- Like Button -->
-          <button onclick="window.auraToggleLikePlaylist('${pl.id}')" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${isLiked ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-white/[0.04] text-slate-400 hover:text-white border border-white/[0.05]'}" title="Like Playlist">
-            <svg class="w-4 h-4 ${isLiked ? 'fill-current' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          <button onclick="event.stopPropagation(); window.auraToggleLikePlaylist('${pl.id}')" class="flex items-center space-x-1 px-2 py-1 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${isLiked ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-white/[0.04] text-slate-400 hover:text-white border border-white/[0.05]'}" title="Like Playlist">
+            <svg class="w-3.5 h-3.5 ${isLiked ? 'fill-current' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
             <span id="aura-pl-likes-${pl.id}">${likesCount}</span>
           </button>
 
           <!-- Save to Library Button -->
-          <button onclick="window.auraToggleSavePlaylist('${pl.id}')" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${isSaved ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/[0.04] text-slate-400 hover:text-white border border-white/[0.05]'}" title="Save to Personal Library">
-            <svg class="w-4 h-4 ${isSaved ? 'fill-current' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
-            <span>${isSaved ? 'Saved' : 'Save'}</span>
+          <button onclick="event.stopPropagation(); window.auraToggleSavePlaylist('${pl.id}')" class="flex items-center space-x-1 px-2 py-1 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${isSaved ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/[0.04] text-slate-400 hover:text-white border border-white/[0.05]'}" title="Save to Personal Library">
+            <svg class="w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+            <span class="hidden sm:inline">${isSaved ? 'Saved' : 'Save'}</span>
           </button>
 
           <!-- Share Button -->
-          <button onclick="window.auraSharePlaylist('${pl.id}', '${encodeURIComponent(pl.name)}')" class="p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-white border border-white/[0.05] transition-colors cursor-pointer" title="Share Playlist Link">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          <button onclick="event.stopPropagation(); window.auraSharePlaylist('${pl.id}', '${encodeURIComponent(pl.name)}')" class="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-white border border-white/[0.05] transition-colors cursor-pointer" title="Share Playlist Link">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           </button>
         </div>
       </div>
@@ -640,7 +667,7 @@
               <span class="text-xs text-slate-500">${playlists.length} playlists</span>
             </div>
             ${playlists.length > 0 ? `
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div class="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
                 ${playlists.map(pl => renderPlaylistCard(pl)).join('')}
               </div>
             ` : `
@@ -1628,11 +1655,35 @@
     const uid = getUserId();
     if (!uid || uid === 'guest') return;
 
-    // Detect Playlist Detail View in <main> (has Play All button or Back to Library button)
     const mainEl = document.querySelector('main');
     if (!mainEl) return;
 
-    // Look for "Back" / "Play All" inside a user playlist view (exclude Liked & Recently Played)
+    let cachedPls = [];
+    try { cachedPls = JSON.parse(localStorage.getItem('auramusic_cached_playlists') || '[]'); } catch {}
+
+    // 1. Immediately patch Library playlist card thumbnails if first song has an image
+    if (cachedPls.length > 0) {
+      mainEl.querySelectorAll('.glass-card').forEach(card => {
+        const titleEl = card.querySelector('h3, h2, .font-bold');
+        const titleText = (titleEl?.textContent || '').trim();
+        if (!titleText) return;
+        const pl = cachedPls.find(p => (p.name || '').trim().toLowerCase() === titleText.toLowerCase());
+        if (!pl) return;
+        const thumbUrl = pl.cover || pl.coverUrl || pl.songs?.[0]?.image;
+        if (!thumbUrl) return;
+        const mediaBox = card.querySelector('.aspect-video');
+        if (mediaBox && !mediaBox.querySelector('img')) {
+          const img = document.createElement('img');
+          img.src = thumbUrl;
+          img.alt = pl.name;
+          img.className = 'w-full h-full object-cover group-hover:scale-105 transition-transform duration-300';
+          const placeholder = mediaBox.querySelector('div.flex.items-center.justify-center');
+          if (placeholder) placeholder.replaceWith(img);
+        }
+      });
+    }
+
+    // 2. Look for "Back" / "Play All" inside a user playlist view (exclude Liked & Recently Played)
     const headings = mainEl.querySelectorAll('h1');
     headings.forEach(h1 => {
       const titleText = (h1.textContent || '').trim();
@@ -1642,8 +1693,6 @@
       if (!headerContainer || headerContainer.querySelector('#aura-pl-visibility-bar')) return;
 
       // Match with cached playlists to confirm it's a user playlist
-      let cachedPls = [];
-      try { cachedPls = JSON.parse(localStorage.getItem('auramusic_cached_playlists') || '[]'); } catch {}
       const matchedPl = cachedPls.find(p => (p.name || '').trim().toLowerCase() === titleText.toLowerCase());
       if (!matchedPl) return;
 
@@ -1766,6 +1815,17 @@
       }
     }
   }
+
+  // Auto-close Community / Creator Profile / Playlist Detail when user taps any bottom nav or header navigation item
+  document.addEventListener('click', (e) => {
+    const navTarget = e.target.closest('nav button, aside button:not(.aura-community-sidebar-btn), header button, header input, header a');
+    if (!navTarget) return;
+    if (navTarget.closest('#aura-community-modal, #aura-creator-profile-modal, #aura-pl-detail-modal')) return;
+    ['aura-community-modal', 'aura-creator-profile-modal', 'aura-pl-detail-modal'].forEach(id => {
+      const m = document.getElementById(id);
+      if (m && m.style.display !== 'none') m.style.display = 'none';
+    });
+  }, true);
 
   // Periodic navigation & profile/playlist UI injector
   setInterval(() => {
