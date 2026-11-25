@@ -1042,6 +1042,98 @@ setTimeout(async () => {
   for (const a of TRENDING_ARTISTS.slice(0, 16)) { await searchYTCached(`${a} popular songs`, 8000); await new Promise(r => setTimeout(r, 400)); }
 }, 4000).unref?.();
 
+async function searchYTMusicInnerTube(query) {
+  if (!query || !query.trim()) return [];
+  const norm = 'ytm_' + query.trim().toLowerCase();
+  const cached = searchCache.get(norm);
+  if (cached && Date.now() - cached.time < 3600000) {
+    warmAudio(ytAudioClient, cached.data.slice(0, 3).map(s => s.videoId));
+    return cached.data;
+  }
+
+  const songs = [];
+  const seen = new Set();
+  const parseDuration = (str) => {
+    const m = String(str || '').match(/(\d+):(\d{2})(?::(\d{2}))?/);
+    if (!m) return 200;
+    return m[3] ? (parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10))
+                : (parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
+  };
+
+  try {
+    const res = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Origin': 'https://music.youtube.com',
+        'Referer': 'https://music.youtube.com/'
+      },
+      body: JSON.stringify({
+        query: query.trim(),
+        params: 'EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D',
+        context: {
+          client: {
+            clientName: 'WEB_REMIX',
+            clientVersion: '1.20250101.01.00',
+            hl: 'en',
+            gl: 'IN'
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(4500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const tabs = data.contents?.tabbedSearchResultsRenderer?.tabs || [];
+      const sections = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+      for (const sec of sections) {
+        const items = sec.musicShelfRenderer?.contents || [];
+        for (const item of items) {
+          const r = item.musicResponsiveListItemRenderer;
+          if (!r) continue;
+          const vid = r.playlistItemData?.videoId ||
+            r.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+          if (!vid || seen.has(vid)) continue;
+          seen.add(vid);
+
+          const title = r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.map(x => x.text).join('') || query;
+          const subRuns = r.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+          const subParts = subRuns.map(x => x.text).join('').split('•').map(s => s.trim()).filter(Boolean);
+          const artist = subParts[0] || 'Unknown Artist';
+          const durPart = subParts.find(p => /^\d+:\d{2}/.test(p));
+          const album = (subParts.length >= 2 && !/^\d+:\d{2}/.test(subParts[1])) ? subParts[1] : 'YouTube Music';
+          const thumbs = r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
+          const rawImg = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+          const image = rawImg.replace(/=w\d+-h\d+/, '=w544-h544');
+
+          songs.push({
+            id: 'yt_' + vid,
+            videoId: vid,
+            name: title,
+            artist,
+            album,
+            duration: parseDuration(durPart),
+            image,
+            url: `/api/yt/stream?id=${vid}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
+            genre: 'Music',
+            year: new Date().getFullYear().toString(),
+            source: 'Mochy YT Music'
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[YTMusic Search] warning:', e.message);
+  }
+
+  if (songs.length > 0) {
+    searchCache.set(norm, { time: Date.now(), data: songs });
+    warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
+  }
+  return songs;
+}
+
 async function searchYouTube(query) {
   if (!query || !query.trim()) return [];
   const norm = query.trim().toLowerCase();
@@ -1128,18 +1220,6 @@ async function searchYouTube(query) {
   }
 
   if (songs.length > 0) {
-    // Fast enrich top 8 search hits with direct 320kbps CDN stream URLs
-    await Promise.all(songs.slice(0, 8).map(async song => {
-      try {
-        const fast = await resolveSaavnAudio(song.name, song.artist);
-        if (fast?.streamUrl) {
-          song.streamUrl = fast.streamUrl;
-          song.url = fast.streamUrl;
-          song.source = 'AuraMusic Lossless 320k';
-        }
-      } catch (_) {}
-    }));
-
     searchCache.set(norm, { time: Date.now(), data: songs });
     // Resolve stream URLs for the top hits in the background so tapping a song starts instantly.
     warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
@@ -1225,45 +1305,11 @@ async function searchYouTube(query) {
           return sendJson(res, 200, finalMerged);
         }
 
-        // Fast path: Top 10 songs from JioSaavn 320k direct CDN (<250ms response, <1.5s playback)
-        try {
-          const saavnDev = await searchSongsSaavnDev(query, 10);
-          if (saavnDev?.success && Array.isArray(saavnDev?.data?.results) && saavnDev.data.results.length > 0) {
-            const fastSongs = saavnDev.data.results.map(r => {
-              const lastUrl = (Array.isArray(r.downloadUrl) && r.downloadUrl.length > 0)
-                ? r.downloadUrl[r.downloadUrl.length - 1]?.url
-                : null;
-              const primaryArtist = r.artists?.primary?.[0]?.name || (Array.isArray(r.artists) ? r.artists[0]?.name : 'Artist');
-              return {
-                id: r.id || `saavn_${Date.now()}_${Math.random()}`,
-                videoId: null,
-                name: r.name,
-                artist: primaryArtist,
-                album: r.album?.name || 'Single',
-                duration: Number(r.duration) || 200,
-                image: r.image?.[r.image.length - 1]?.url || r.image?.[0]?.url || '/logo.png',
-                url: lastUrl,
-                streamUrl: lastUrl,
-                downloadUrl: r.downloadUrl,
-                source: 'AuraMusic Lossless 320k'
-              };
-            }).filter(s => s.streamUrl);
-
-            if (fastSongs.length > 0) {
-              const ytResults = await searchYouTube(query).catch(() => []);
-              const combined = [...fastSongs];
-              for (const y of ytResults) {
-                if (!combined.some(c => c.name.toLowerCase() === y.name.toLowerCase())) {
-                  combined.push(y);
-                }
-              }
-              res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
-              return sendJson(res, 200, combined);
-            }
-          }
-        } catch (_) {}
-
-        const results = await searchYouTube(query);
+        // Primary: Mochy YouTube Music InnerTube Search (exact YT Music catalog & order)
+        let results = await searchYTMusicInnerTube(query).catch(() => []);
+        if (!results || results.length === 0) {
+          results = await searchYouTube(query);
+        }
         res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
         return sendJson(res, 200, results);
       }
@@ -1623,28 +1669,9 @@ async function searchYouTube(query) {
 
         const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || '';
         const qArtist = parsedUrl.searchParams.get('artist') || '';
-
-        // ── TIER 1: Instant JioSaavn 320kbps HD CDN (<250ms response, zero buffering) ──
-        try {
-          const fast = await resolveFastAudio(cleanId, qTitle, qArtist);
-          if (fast?.streamUrl) {
-            if (parsedUrl.searchParams.get('json') === '1') {
-              return sendJson(res, 200, { streamUrl: fast.streamUrl, source: fast.source });
-            }
-            res.writeHead(307, {
-              'Location': fast.streamUrl,
-              'Cache-Control': 'public, max-age=86400',
-              'Access-Control-Allow-Origin': '*'
-            });
-            return res.end();
-          }
-        } catch (e) {
-          console.warn(`[FAST_AUDIO] lookup warning for ${cleanId}: ${e.message}`);
-        }
-
         const clientIp = getClientIp(req);
 
-        // ── TIER 2: YouTube Audio (Client.Tv / Client.VisionOS bypasses bot checks) ──
+        // ── TIER 1: Mochy InnerTube (ANDROID_VR / IOS) + YouTube Audio for exact videoId ──
         const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
 
         if (resolved?.streamUrl) {
@@ -1666,8 +1693,8 @@ async function searchYouTube(query) {
             return res.end();
           }
 
-          // ytdl IP-matched URL: also redirect directly
-          if (src === 'ytdl' && urlWorksForClient(resolved.streamUrl, clientIp)) {
+          // ytdl / innertube IP-matched URL: also redirect directly when same IP
+          if ((src === 'ytdl' || src.startsWith('innertube:')) && urlWorksForClient(resolved.streamUrl, clientIp)) {
             if (parsedUrl.searchParams.get('json') !== '1') {
               res.writeHead(307, {
                 'Location': resolved.streamUrl,

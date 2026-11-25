@@ -23,6 +23,26 @@
     <script src="https://www.youtube.com/iframe_api"></script>
     <title>AuraMusic</title>
     <script src="/prefetch.v3.js"></script>
+    <script>
+      (function(){
+        var OrigAudio = window.Audio;
+        window.__auraAudioInstances = [];
+        window.Audio = function(src) {
+          var a = new OrigAudio(src);
+          window.__auraAudioInstances.push(a);
+          if (!a.id || a.id !== 'aura-shadow-preloader') window.__auraMainAudio = a;
+          return a;
+        };
+        window.Audio.prototype = OrigAudio.prototype;
+        var origPlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function() {
+          if (this.tagName === 'AUDIO' && this.id !== 'aura-shadow-preloader') {
+            window.__auraMainAudio = this;
+          }
+          return origPlay.apply(this, arguments);
+        };
+      })();
+    </script>
     <script type="module" crossorigin src="/assets/index-aura3.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-D7KSEyRA.css">
     <!-- Freefy Login & Registration System Integration -->

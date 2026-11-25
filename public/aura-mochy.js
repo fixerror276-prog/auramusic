@@ -68,6 +68,14 @@
   }
 
   function getMainAudio() {
+    if (window.__auraMainAudio && window.__auraMainAudio.id !== 'aura-shadow-preloader') {
+      return window.__auraMainAudio;
+    }
+    if (Array.isArray(window.__auraAudioInstances) && window.__auraAudioInstances.length > 0) {
+      const found = window.__auraAudioInstances.find(a => a && a.id !== 'aura-shadow-preloader' && a.src)
+                 || window.__auraAudioInstances.find(a => a && a.id !== 'aura-shadow-preloader');
+      if (found) return found;
+    }
     const audios = Array.from(document.querySelectorAll('audio'));
     return audios.find(a => a.id !== 'aura-shadow-preloader' && a.src) || audios.find(a => a.id !== 'aura-shadow-preloader') || null;
   }
@@ -209,6 +217,11 @@
     if (!audio) return false;
     try {
       audio.playbackRate = Number(settings.playbackSpeed) || 1.0;
+      const hasActiveDsp = settings.eightD || Number(settings.bassBoost || 0) !== 0 ||
+        (settings.eqBands || []).some(g => Number(g) !== 0);
+      if (!hasActiveDsp && !_dspConnected) {
+        return true;
+      }
       if (_dspConnected) {
         updateDspParams();
         return true;
@@ -878,8 +891,8 @@
             <button onclick="document.getElementById('aura-mochy-skin-overlay').remove()" class="absolute top-3 left-1/2 -translate-x-1/2 text-[10px] font-black text-slate-300 tracking-wider cursor-pointer">MENU</button>
             <button onclick="document.querySelector('button[title*=Previous], button[aria-label*=Previous]')?.click(); setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),300)" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm cursor-pointer">⏮</button>
             <button onclick="document.querySelector('button[title*=Next], button[aria-label*=Next]')?.click(); setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),300)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm cursor-pointer">⏭</button>
-            <button onclick="const a=document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),150)" class="absolute bottom-3 left-1/2 -translate-x-1/2 text-slate-300 text-xs cursor-pointer">⏯</button>
-            <div onclick="const a=document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),150)" class="mochy-ipod-center text-white text-xs font-bold">●</div>
+            <button onclick="const a=window.__auraMainAudio||document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),150)" class="absolute bottom-3 left-1/2 -translate-x-1/2 text-slate-300 text-xs cursor-pointer">⏯</button>
+            <div onclick="const a=window.__auraMainAudio||document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('ipod'),150)" class="mochy-ipod-center text-white text-xs font-bold">●</div>
           </div>
         </div>
       `;
@@ -896,7 +909,7 @@
               <div class="text-sm font-black text-white truncate">${song.name}</div>
               <div class="text-xs text-slate-400 truncate">${song.artist || 'Artist'}</div>
             </div>
-            <button onclick="const a=document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('bedside'),150)" class="w-11 h-11 rounded-full bg-emerald-500 text-black font-bold flex items-center justify-center cursor-pointer">${isPlaying ? '⏸' : '▶'}</button>
+            <button onclick="const a=window.__auraMainAudio||document.querySelector('audio:not(#aura-shadow-preloader)'); if(a){a.paused?a.play():a.pause();} setTimeout(()=>window.auraLaunchSkinOverlay('bedside'),150)" class="w-11 h-11 rounded-full bg-emerald-500 text-black font-bold flex items-center justify-center cursor-pointer">${isPlaying ? '⏸' : '▶'}</button>
           </div>
         </div>
       `;
@@ -1004,10 +1017,12 @@
   // ── Lyrics Ticker ──────────────────────────────────────────────────────────
   window.auraStartLiveLyrics = async function() {
     const song = getCurrentSong();
-    if (!song || !song.name) return toast('Play a song first', 'error');
+    if (!song || (!song.name && !song.title)) return toast('Play a song first', 'error');
+    const songName = song.name || song.title || '';
+    const artistName = song.artist || '';
     toast('Fetching synced lyrics…');
     try {
-      const res = await fetch('/api/lyrics/live?title=' + encodeURIComponent(song.name) + '&artist=' + encodeURIComponent(song.artist || ''));
+      const res = await fetch('/api/lyrics/live?title=' + encodeURIComponent(songName) + '&artist=' + encodeURIComponent(artistName));
       const data = await res.json();
       if (!data.success || !data.lines || !data.lines.length) {
         return toast('No synced lyrics found for this song', 'error');
@@ -1036,14 +1051,19 @@
     if (existing) existing.remove();
     clearInterval(_lyricsInterval);
 
-    // Create ticker bar above player (player bar is ~64px, so bottom: 64px)
+    // Create ticker bar above player & mobile bottom nav
+    const isMobile = window.innerWidth < 768;
     const ticker = document.createElement('div');
     ticker.id = 'aura-lyrics-ticker';
     ticker.style.cssText = [
-      'position:fixed', 'left:0', 'right:0', 'bottom:64px', 'z-index:24',
-      'background:linear-gradient(to right,rgba(7,8,12,0.95),rgba(16,185,129,0.12),rgba(7,8,12,0.95))',
-      'border-top:1px solid rgba(16,185,129,0.15)',
-      'padding:6px 48px 6px 12px', 'pointer-events:auto',
+      'position:fixed', 'left:0', 'right:0',
+      'bottom:' + (isMobile ? '130px' : '84px'),
+      'z-index:35',
+      'background:linear-gradient(to right,rgba(7,8,12,0.96),rgba(16,185,129,0.16),rgba(7,8,12,0.96))',
+      'border-top:1px solid rgba(16,185,129,0.22)',
+      'border-bottom:1px solid rgba(16,185,129,0.12)',
+      'backdrop-filter:blur(10px)',
+      'padding:6px 44px 6px 12px', 'pointer-events:auto',
       'display:flex', 'flex-direction:column', 'gap:2px'
     ].join(';');
 
@@ -1078,7 +1098,7 @@
         }
         line2.textContent = nextText;
       } else {
-        line1.textContent = '♪ ' + (getCurrentSong() ? getCurrentSong().name || '' : '');
+        line1.textContent = '♪ ' + (getCurrentSong() ? (getCurrentSong().name || getCurrentSong().title || '') : '');
         line2.textContent = '';
       }
     }
@@ -1122,7 +1142,7 @@
       });
       const data = await res.json();
       if (!data.success) return toast(data.error || 'Failed to create room', 'error');
-      _liveRoomId = data.roomId;
+      _liveRoomId = data.room ? data.room.roomId : data.roomId;
       _liveIsHost = true;
       toast('🔴 Live room created: ' + _liveRoomId);
       // Start host sync every 3s
@@ -1166,13 +1186,33 @@
             const au = getMainAudio();
             const song = d.room.song;
             const curSong = getCurrentSong();
-            // Load new song if different
-            if (song && au && (!curSong || curSong.videoId !== song.videoId)) {
-              if (window.auraPlayVideo) window.auraPlayVideo(song.videoId, song.name, song.artist, song.image);
-            }
-            // Seek to live position (allow ±2s tolerance)
-            if (au && Math.abs(au.currentTime - d.room.livePositionSec) > 2) {
-              au.currentTime = d.room.livePositionSec;
+            // Load new song if different — use __auraPlaySong or direct audio fallback
+            if (song && (!curSong || (song.videoId && curSong.videoId !== song.videoId) || (song.name && curSong.name !== song.name))) {
+              const streamUrl = song.url || (song.videoId ? '/api/yt/stream?id=' + encodeURIComponent(song.videoId) + '&title=' + encodeURIComponent(song.name || '') : '');
+              const songObj = {
+                name: song.name || song.title, title: song.name || song.title,
+                artist: song.artist || 'Artist', image: song.image || '/logo.png',
+                videoId: song.videoId, id: song.id || song.videoId,
+                url: streamUrl
+              };
+              if (typeof window.__auraPlaySong === 'function') {
+                window.__auraPlaySong(songObj, [songObj]);
+              } else if (au && streamUrl) {
+                try { localStorage.setItem('auramusic_current_song', JSON.stringify(songObj)); } catch {}
+                au.src = streamUrl;
+                au.play().catch(function() {});
+              }
+              const targetSeek = d.room.livePositionSec || 0;
+              if (au && targetSeek > 2) {
+                const onLoaded = function() {
+                  au.removeEventListener('canplay', onLoaded);
+                  try { au.currentTime = targetSeek; } catch {}
+                };
+                au.addEventListener('canplay', onLoaded);
+              }
+            } else if (au && Math.abs(au.currentTime - d.room.livePositionSec) > 2.5) {
+              // Seek to live position (allow ±2.5s tolerance)
+              try { au.currentTime = d.room.livePositionSec; } catch {}
             }
             if (au) {
               if (d.room.isPlaying && au.paused) au.play().catch(function() {});
@@ -1239,6 +1279,24 @@
         window.auraOpenMochyStudio('audiolab');
       };
       sidebarNav.appendChild(btn);
+
+      if (!sidebarNav.querySelector('.aura-mochy-live-btn')) {
+        const liveBtn = document.createElement('button');
+        liveBtn.className = 'aura-mochy-live-btn w-full flex items-center justify-between px-3.5 py-3 rounded-2xl font-bold text-sm transition-all duration-200 text-slate-400 hover:text-white hover:bg-white/[0.05] cursor-pointer';
+        liveBtn.innerHTML = `
+          <div class="flex items-center space-x-3.5">
+            <span class="text-base">🔴</span>
+            <span>Live & Synced Lyrics</span>
+          </div>
+          <span class="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">LIVE</span>
+        `;
+        liveBtn.onclick = () => {
+          const mobileOverlay = liveBtn.closest('.fixed.inset-0');
+          if (mobileOverlay) mobileOverlay.click();
+          window.auraOpenMochyStudio('live');
+        };
+        sidebarNav.appendChild(liveBtn);
+      }
     });
 
     // Apply Vinyl Turntable spin to fullscreen player cover if selected
@@ -1256,20 +1314,35 @@
 
   // Auto-close Mochy Studio when tapping bottom nav or header
   document.addEventListener('click', (e) => {
-    const navTarget = e.target.closest('nav button, aside button:not(.aura-mochy-sidebar-btn), header button, header input, header a');
+    const navTarget = e.target.closest('nav button, aside button:not(.aura-mochy-sidebar-btn):not(.aura-mochy-live-btn), header button, header input, header a');
     if (!navTarget) return;
     if (navTarget.closest('#aura-mochy-modal, #aura-mochy-skin-overlay, #aura-mochy-share-modal')) return;
     window.auraCloseMochyStudio();
   }, true);
 
-  setInterval(injectMochyNav, 1000);
+  let _lastLiveLyricsKey = '';
+  function syncOnSongActivity() {
+    applyGlobalPreferences();
+    ensureAudioDsp();
+    if (_lyricsInterval) {
+      const s = getCurrentSong();
+      const key = s ? `${s.videoId || ''}_${s.name || s.title || ''}` : '';
+      if (key && key !== _lastLiveLyricsKey) {
+        _lastLiveLyricsKey = key;
+        window.auraStartLiveLyrics();
+      }
+    }
+  }
+
+  setInterval(() => {
+    injectMochyNav();
+    if (_lyricsInterval) syncOnSongActivity();
+  }, 1000);
   window.addEventListener('DOMContentLoaded', () => {
     applyGlobalPreferences();
     injectMochyNav();
   });
-  window.addEventListener('play', () => {
-    applyGlobalPreferences();
-  }, true);
+  window.addEventListener('play', syncOnSongActivity, true);
 
   console.log('🎛️ AuraMusic × Mochy Suite Loaded.');
 })();
