@@ -15,7 +15,7 @@
   function getUser() {
     try { return JSON.parse(localStorage.getItem('auramusic_current_user') || 'null'); } catch { return null; }
   }
-  function getUserId() { const u = getUser(); return (u && u.email) ? u.email : 'guest'; }
+  function getUserId() { const u = getUser(); return (u && (u.id || u._id || u.email)) ? (u.id || u._id || u.email) : 'guest'; }
   function getCurrentSong() {
     try { return JSON.parse(localStorage.getItem('auramusic_current_song') || 'null'); } catch { return null; }
   }
@@ -635,12 +635,19 @@
               const sid = song.id || song.videoId;
               if (!pl.songs) pl.songs = [];
               if (!pl.songs.some(s => (s.id || s.videoId) === sid)) pl.songs.unshift(song);
+              if (!pl.cover && !pl.coverUrl && song.image) {
+                pl.cover = song.image;
+                pl.coverUrl = song.image;
+              }
               localStorage.setItem('auramusic_cached_playlists', JSON.stringify(cached));
             }
           } catch {}
+          if (typeof window.__auraRefreshPlaylists === 'function') {
+            window.__auraRefreshPlaylists();
+          }
         }
       } else {
-        toast('Failed to add song', 'error');
+        toast(data.error || 'Failed to add song', 'error');
       }
     } catch {
       toast('Network error', 'error');

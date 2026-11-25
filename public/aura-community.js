@@ -133,31 +133,20 @@
   document.head.appendChild(styleEl);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 1. TOP HEADER & NAVIGATION COMMUNITY BUTTON INJECTION
+  // 1. 3-LINE MENU DRAWER & SIDEBAR COMMUNITY BUTTON INJECTION
+  // (Removed from top header as requested; placed inside 3-line menu drawer!)
   // ═══════════════════════════════════════════════════════════════════════════
   function injectCommunityNavButtons() {
-    // 1. Top Header Pill
-    const headerRight = document.querySelector('header div[class*="flex items-center space-x"], header [class*="space-x-2"], [class*="flex items-center gap-2"]');
-    if (headerRight && !document.getElementById('aura-community-header-btn')) {
-      const btn = document.createElement('button');
-      btn.id = 'aura-community-header-btn';
-      btn.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 select-none';
-      btn.innerHTML = `
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
-        </svg>
-        <span>Community</span>
-      `;
-      btn.onclick = () => window.auraOpenCommunity();
-      headerRight.insertBefore(btn, headerRight.firstChild);
-    }
+    // Ensure top header button is removed if previously present
+    const oldHeaderBtn = document.getElementById('aura-community-header-btn');
+    if (oldHeaderBtn) oldHeaderBtn.remove();
 
-    // 2. Desktop Sidebar Link
-    const sidebarNav = document.querySelector('aside [class*="space-y-1.5"], aside nav');
-    if (sidebarNav && !document.getElementById('aura-community-sidebar-btn')) {
+    // Inject into ALL sidebars (desktop sidebar + mobile 3-line hamburger drawer)
+    const sidebarNavs = document.querySelectorAll('aside [class*="space-y-1.5"], aside nav');
+    sidebarNavs.forEach(sidebarNav => {
+      if (sidebarNav.querySelector('.aura-community-sidebar-btn')) return;
       const sBtn = document.createElement('button');
-      sBtn.id = 'aura-community-sidebar-btn';
-      sBtn.className = 'w-full flex items-center justify-between px-3.5 py-3 rounded-2xl font-bold text-sm transition-all duration-200 text-slate-400 hover:text-white hover:bg-white/[0.05] cursor-pointer';
+      sBtn.className = 'aura-community-sidebar-btn w-full flex items-center justify-between px-3.5 py-3 rounded-2xl font-bold text-sm transition-all duration-200 text-slate-400 hover:text-white hover:bg-white/[0.05] cursor-pointer';
       sBtn.innerHTML = `
         <div class="flex items-center space-x-3.5">
           <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -167,9 +156,14 @@
         </div>
         <span class="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Social</span>
       `;
-      sBtn.onclick = () => window.auraOpenCommunity();
+      sBtn.onclick = () => {
+        // Close mobile 3-line drawer if open
+        const mobileOverlay = sBtn.closest('.fixed.inset-0');
+        if (mobileOverlay) mobileOverlay.click();
+        window.auraOpenCommunity();
+      };
       sidebarNav.appendChild(sBtn);
-    }
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -446,8 +440,8 @@
 
     return `
       <div class="aura-community-card group" data-playlist-id="${pl.id}">
-        <!-- Cover Art & Quick Play Button -->
-        <div class="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 mb-3.5">
+        <!-- Cover Art (First Song Thumbnail or Gallery Cover) & Quick Play Button -->
+        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 mb-3.5 cursor-pointer">
           <img src="${coverUrl}" alt="${pl.name}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
           <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80"></div>
           
@@ -460,13 +454,13 @@
           </div>
 
           <!-- Play Button Overlay -->
-          <button onclick="window.auraPlayCommunityPlaylist('${pl.id}')" class="absolute bottom-2.5 right-2.5 w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl shadow-emerald-500/30 transition-transform hover:scale-110 active:scale-95 cursor-pointer" title="Play Playlist">
+          <button onclick="event.stopPropagation(); window.auraPlayCommunityPlaylist('${pl.id}')" class="absolute bottom-2.5 right-2.5 w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl shadow-emerald-500/30 transition-transform hover:scale-110 active:scale-95 cursor-pointer" title="Play Playlist">
             <svg class="w-5 h-5 ml-0.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           </button>
         </div>
 
-        <!-- Playlist Title & Song Count -->
-        <div class="flex-1 space-y-1 mb-3">
+        <!-- Playlist Title & Song Count (Tap to view songs & creator profile) -->
+        <div onclick="window.auraOpenCommunityPlaylist('${pl.id}')" class="flex-1 space-y-1 mb-3 cursor-pointer">
           <h3 class="font-bold text-white text-base leading-snug line-clamp-1 group-hover:text-emerald-400 transition-colors" title="${pl.name}">
             ${pl.name}
           </h3>
@@ -1437,6 +1431,321 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // 13B. COMMUNITY PLAYLIST DETAIL MODAL (Tap Playlist -> Show Songs & Creator)
+  // ═══════════════════════════════════════════════════════════════════════════
+  window.auraOpenCommunityPlaylist = async function(playlistId) {
+    if (!playlistId) return;
+    const currentUserId = getUserId();
+
+    let modal = document.getElementById('aura-pl-detail-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'aura-pl-detail-modal';
+      modal.className = 'fixed inset-0 z-[10500] bg-[#07080c]/98 backdrop-blur-2xl text-slate-100 flex flex-col overflow-y-auto animate-fadeIn select-none font-sans p-4 sm:p-8';
+      document.body.appendChild(modal);
+    }
+    modal.style.display = 'flex';
+    modal.innerHTML = `<div class="max-w-3xl mx-auto w-full py-20 text-center text-slate-500 text-sm animate-pulse">Loading playlist tracks...</div>`;
+
+    try {
+      const res = await fetch(`/api/playlists/details?id=${encodeURIComponent(playlistId)}&userId=${encodeURIComponent(currentUserId)}`);
+      const data = await res.json();
+      if (!data || !data.success || !data.playlist) {
+        modal.innerHTML = `
+          <div class="max-w-md mx-auto text-center py-20 space-y-4">
+            <h2 class="text-xl font-bold text-white">${data.error || 'Playlist not found'}</h2>
+            <button onclick="document.getElementById('aura-pl-detail-modal').style.display='none'" class="px-5 py-2 rounded-xl bg-white/10 text-white text-xs font-bold cursor-pointer">Close</button>
+          </div>
+        `;
+        return;
+      }
+
+      const pl = data.playlist;
+      const songs = pl.songs || [];
+      const creator = pl.creator || {};
+      const coverUrl = pl.coverUrl || pl.cover || songs[0]?.image || '/logo.png';
+
+      window.__auraTempPlSongs = songs;
+
+      modal.innerHTML = `
+        <div class="max-w-3xl mx-auto w-full py-2 space-y-6 pb-32">
+          <div class="flex items-center justify-between">
+            <button onclick="document.getElementById('aura-pl-detail-modal').style.display='none'" class="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-400 hover:text-white cursor-pointer py-1">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+              <span>Back</span>
+            </button>
+            <button onclick="document.getElementById('aura-pl-detail-modal').style.display='none'" class="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/[0.08] cursor-pointer">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <!-- Playlist Hero Header -->
+          <div class="rounded-3xl bg-[#0e1320] border border-white/[0.08] p-5 sm:p-7 flex flex-col sm:flex-row items-center sm:items-end gap-5 shadow-2xl">
+            <img src="${coverUrl}" alt="${pl.name}" class="w-32 h-32 sm:w-40 sm:h-40 rounded-2xl object-cover shadow-2xl ring-2 ring-emerald-500/30 bg-slate-900 shrink-0" />
+            <div class="flex-1 text-center sm:text-left space-y-2.5">
+              <span class="aura-community-badge ${pl.visibility === 'public' ? 'aura-badge-public' : 'aura-badge-private'}">${pl.visibility === 'public' ? '🌐 PUBLIC PLAYLIST' : '🔒 PRIVATE PLAYLIST'}</span>
+              <h1 class="text-2xl sm:text-3xl font-black text-white leading-tight">${pl.name}</h1>
+              ${pl.description ? `<p class="text-xs text-slate-400">${pl.description}</p>` : ''}
+              <!-- Clickable Creator Profile -->
+              <div onclick="document.getElementById('aura-pl-detail-modal').style.display='none'; window.auraOpenCreatorProfile('${creator.userId}')" class="inline-flex items-center space-x-2 py-1 px-2.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] cursor-pointer transition-colors">
+                <img src="${creator.avatar || '/avatars/p1.jpg'}" alt="${creator.displayName}" class="w-5 h-5 rounded-full object-cover" />
+                <span class="text-xs font-bold text-slate-200">${creator.displayName || 'Creator'}</span>
+                <span class="text-[10px] text-slate-400">@${creator.username || 'user'}</span>
+              </div>
+
+              <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-2">
+                <button onclick="window.auraPlayCommunityPlaylist('${pl.id}'); document.getElementById('aura-pl-detail-modal').style.display='none';" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center space-x-1.5 cursor-pointer shadow-lg shadow-emerald-500/20">
+                  <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span>Play All (${songs.length})</span>
+                </button>
+                <button onclick="window.auraToggleLikePlaylist('${pl.id}')" class="px-3.5 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-white cursor-pointer">❤️ ${pl.likesCount || 0}</button>
+                <button onclick="window.auraToggleSavePlaylist('${pl.id}')" class="px-3.5 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-white cursor-pointer">${pl.isSaved ? '✓ Saved' : '💾 Save'}</button>
+                <button onclick="window.auraSharePlaylist('${pl.id}', '${encodeURIComponent(pl.name)}')" class="px-3.5 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-white cursor-pointer">🔗 Share</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Songs List -->
+          <div class="space-y-2">
+            <h3 class="text-sm font-extrabold text-slate-300 px-1">Tracks (${songs.length})</h3>
+            ${songs.length === 0 ? `
+              <div class="p-10 text-center text-slate-500 text-xs rounded-2xl bg-white/[0.02] border border-white/[0.05]">No songs in this playlist yet.</div>
+            ` : songs.map((s, idx) => `
+              <div onclick="window.auraPlayCommunityTrack(${idx})" class="flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.04] cursor-pointer transition-all group">
+                <div class="flex items-center space-x-3 min-w-0">
+                  <span class="text-xs font-mono text-slate-500 w-5 text-center">${idx + 1}</span>
+                  <img src="${s.image || '/logo.png'}" alt="${s.name || s.title}" class="w-11 h-11 rounded-xl object-cover bg-slate-900 shrink-0" />
+                  <div class="min-w-0">
+                    <div class="text-sm font-bold text-white truncate group-hover:text-emerald-400 transition-colors">${s.name || s.title || 'Track'}</div>
+                    <div class="text-xs text-slate-400 truncate">${s.artist || 'Artist'}</div>
+                  </div>
+                </div>
+                <button class="w-9 h-9 rounded-full bg-emerald-500/15 group-hover:bg-emerald-500 text-emerald-400 group-hover:text-black flex items-center justify-center transition-colors shrink-0">
+                  <svg class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      modal.innerHTML = `<div class="p-12 text-center text-red-400 text-sm">Failed to load playlist: ${e.message}</div>`;
+    }
+  };
+
+  window.auraPlayCommunityTrack = function(index) {
+    const songs = window.__auraTempPlSongs || [];
+    if (!songs[index]) return;
+    if (window.__auraPlaySong) {
+      window.__auraPlaySong(songs[index], songs);
+      toast(`▶ Playing "${songs[index].name || songs[index].title}"`);
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 13C. PROFILE PAGE CORNER PENCIL ICON + GALLERY UPLOAD & PLAYLIST VISIBILITY
+  // ═══════════════════════════════════════════════════════════════════════════
+  function injectProfilePageEnhancements() {
+    const u = getUser();
+    if (!u) return;
+
+    // Detect Profile hero card (has Logout button + w-28 h-28 avatar)
+    const profileImgs = document.querySelectorAll('main img.w-28.h-28, main img[class*="md:w-32"]');
+    profileImgs.forEach(img => {
+      const heroCard = img.closest('.glass-panel, .rounded-3xl');
+      if (!heroCard || heroCard.closest('#aura-creator-profile-modal')) return;
+
+      // 1. Add top-right corner Pencil (✏️) button for Display Name, Bio & Profile Edit
+      if (!heroCard.querySelector('#aura-profile-corner-pencil')) {
+        heroCard.style.position = 'relative';
+        const pencilBtn = document.createElement('button');
+        pencilBtn.id = 'aura-profile-corner-pencil';
+        pencilBtn.title = 'Edit Profile, Display Name, Bio & Photo';
+        pencilBtn.className = 'absolute top-4 right-4 w-10 h-10 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-lg transition-all cursor-pointer active:scale-95 z-20';
+        pencilBtn.innerHTML = `
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>
+          </svg>
+        `;
+        pencilBtn.onclick = (e) => {
+          e.stopPropagation();
+          window.auraOpenEditProfileModal();
+        };
+        heroCard.appendChild(pencilBtn);
+      }
+
+      // 2. Add Gallery / Camera badge on avatar container (NO zoom on avatar tap!)
+      const avatarWrapper = img.parentElement;
+      if (avatarWrapper && !avatarWrapper.querySelector('#aura-avatar-gallery-btn')) {
+        avatarWrapper.style.position = 'relative';
+        const camBtn = document.createElement('button');
+        camBtn.id = 'aura-avatar-gallery-btn';
+        camBtn.title = 'Upload Photo from Gallery';
+        camBtn.className = 'absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl border-2 border-[#090a0f] cursor-pointer active:scale-95 z-20 transition-transform';
+        camBtn.innerHTML = `
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+          </svg>
+        `;
+        camBtn.onclick = (e) => {
+          e.stopPropagation();
+          let fileInp = document.getElementById('aura-direct-gallery-input');
+          if (!fileInp) {
+            fileInp = document.createElement('input');
+            fileInp.type = 'file';
+            fileInp.id = 'aura-direct-gallery-input';
+            fileInp.accept = 'image/jpeg,image/png,image/webp';
+            fileInp.style.display = 'none';
+            fileInp.onchange = function() { window.auraHandleAvatarFileSelect(this); };
+            document.body.appendChild(fileInp);
+          }
+          fileInp.click();
+        };
+        avatarWrapper.appendChild(camBtn);
+      }
+
+      // 3. Display saved Bio under Display Name if not already shown
+      const nameHeading = heroCard.querySelector('h1');
+      if (nameHeading && !heroCard.querySelector('#aura-profile-bio-text')) {
+        const bioEl = document.createElement('p');
+        bioEl.id = 'aura-profile-bio-text';
+        bioEl.className = 'text-xs text-slate-300 max-w-md mx-auto sm:mx-0 hidden';
+        nameHeading.insertAdjacentElement('afterend', bioEl);
+        fetch(`/api/community/profile?userId=${encodeURIComponent(getUserId())}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d?.profile?.bio) {
+              bioEl.textContent = d.profile.bio;
+              bioEl.classList.remove('hidden');
+            }
+          }).catch(() => {});
+      }
+    });
+  }
+
+  // Inject Public/Private Toggle & Gallery Cover Upload inside Library & Playlist Detail View
+  function injectPlaylistControlsEnhancements() {
+    const uid = getUserId();
+    if (!uid || uid === 'guest') return;
+
+    // Detect Playlist Detail View in <main> (has Play All button or Back to Library button)
+    const mainEl = document.querySelector('main');
+    if (!mainEl) return;
+
+    // Look for "Back" / "Play All" inside a user playlist view (exclude Liked & Recently Played)
+    const headings = mainEl.querySelectorAll('h1');
+    headings.forEach(h1 => {
+      const titleText = (h1.textContent || '').trim();
+      if (!titleText || titleText === 'Your Library' || titleText === 'Liked Songs' || titleText === 'Recently Played' || titleText === 'Home' || titleText === 'Search') return;
+
+      const headerContainer = h1.closest('.flex, .space-y-4, .rounded-3xl, div');
+      if (!headerContainer || headerContainer.querySelector('#aura-pl-visibility-bar')) return;
+
+      // Match with cached playlists to confirm it's a user playlist
+      let cachedPls = [];
+      try { cachedPls = JSON.parse(localStorage.getItem('auramusic_cached_playlists') || '[]'); } catch {}
+      const matchedPl = cachedPls.find(p => (p.name || '').trim().toLowerCase() === titleText.toLowerCase());
+      if (!matchedPl) return;
+
+      const plId = String(matchedPl.id || matchedPl._id);
+      const isPublic = matchedPl.visibility === 'public';
+
+      const bar = document.createElement('div');
+      bar.id = 'aura-pl-visibility-bar';
+      bar.className = 'flex flex-wrap items-center gap-2 pt-2';
+      bar.innerHTML = `
+        <button id="aura-pl-vis-toggle-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${isPublic ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' : 'bg-white/[0.06] text-slate-300 border-white/15'}">
+          <span>${isPublic ? '🌐 Public (In Community)' : '🔒 Private (Only You)'}</span>
+        </button>
+        <button id="aura-pl-cover-gallery-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-bold text-slate-200 cursor-pointer">
+          <span>🖼️ Change Cover</span>
+        </button>
+        <button id="aura-pl-share-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-bold text-slate-200 cursor-pointer ${isPublic ? '' : 'hidden'}">
+          <span>🔗 Share</span>
+        </button>
+        <input type="file" id="aura-pl-cover-input" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+      `;
+      h1.insertAdjacentElement('afterend', bar);
+
+      // Visibility toggle handler
+      const visBtn = bar.querySelector('#aura-pl-vis-toggle-btn');
+      const shareBtn = bar.querySelector('#aura-pl-share-btn');
+      visBtn.onclick = async () => {
+        const nextVis = matchedPl.visibility === 'public' ? 'private' : 'public';
+        visBtn.disabled = true;
+        try {
+          const r = await fetch('/api/playlists', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: uid, playlistId: plId, action: 'update_visibility', visibility: nextVis })
+          });
+          const j = await r.json();
+          if (j && j.success) {
+            matchedPl.visibility = nextVis;
+            localStorage.setItem('auramusic_cached_playlists', JSON.stringify(cachedPls));
+            const pub = nextVis === 'public';
+            visBtn.innerHTML = `<span>${pub ? '🌐 Public (In Community)' : '🔒 Private (Only You)'}</span>`;
+            visBtn.className = `inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${pub ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' : 'bg-white/[0.06] text-slate-300 border-white/15'}`;
+            if (pub) shareBtn.classList.remove('hidden'); else shareBtn.classList.add('hidden');
+            toast(pub ? '🌐 Playlist is now PUBLIC in Community!' : '🔒 Playlist is now PRIVATE');
+          } else {
+            toast(j.error || 'Failed to update visibility', 'error');
+          }
+        } catch (err) {
+          toast('Network error updating visibility', 'error');
+        } finally {
+          visBtn.disabled = false;
+        }
+      };
+
+      // Share handler
+      shareBtn.onclick = () => window.auraSharePlaylist(plId, encodeURIComponent(matchedPl.name));
+
+      // Gallery cover upload handler
+      const coverBtn = bar.querySelector('#aura-pl-cover-gallery-btn');
+      const coverInput = bar.querySelector('#aura-pl-cover-input');
+      coverBtn.onclick = () => coverInput.click();
+      coverInput.onchange = function() {
+        if (!this.files || !this.files[0]) return;
+        const file = this.files[0];
+        if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type.toLowerCase())) {
+          toast('Supported formats: JPG, JPEG, PNG, WEBP.', 'error');
+          return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          toast('Image exceeds 5MB limit.', 'error');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          toast('Uploading playlist cover...');
+          try {
+            const r = await fetch('/api/playlists/upload-cover', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: uid, playlistId: plId, imageBase64: ev.target.result })
+            });
+            const j = await r.json();
+            if (j && j.success && j.coverUrl) {
+              matchedPl.cover = j.coverUrl;
+              matchedPl.coverUrl = j.coverUrl;
+              localStorage.setItem('auramusic_cached_playlists', JSON.stringify(cachedPls));
+              toast('Playlist cover updated ✓');
+              if (typeof window.__auraRefreshPlaylists === 'function') window.__auraRefreshPlaylists();
+            } else {
+              toast(j.error || 'Cover upload failed', 'error');
+            }
+          } catch {
+            toast('Failed to upload cover', 'error');
+          }
+        };
+        reader.readAsDataURL(file);
+        this.value = '';
+      };
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // 14. DEEP-LINK HASH ROUTING (#community, #playlist=..., #creator=...)
   // ═══════════════════════════════════════════════════════════════════════════
   function checkHashRouting() {
@@ -1448,7 +1757,7 @@
     } else if (hash.startsWith('#playlist=')) {
       const plId = hash.replace('#playlist=', '').trim();
       if (plId) {
-        window.auraPlayCommunityPlaylist(plId);
+        window.auraOpenCommunityPlaylist(plId);
       }
     } else if (hash.startsWith('#creator=')) {
       const creatorId = hash.replace('#creator=', '').trim();
@@ -1458,10 +1767,16 @@
     }
   }
 
-  // Periodic navigation injector
-  setInterval(injectCommunityNavButtons, 1200);
+  // Periodic navigation & profile/playlist UI injector
+  setInterval(() => {
+    injectCommunityNavButtons();
+    injectProfilePageEnhancements();
+    injectPlaylistControlsEnhancements();
+  }, 800);
   window.addEventListener('DOMContentLoaded', () => {
     injectCommunityNavButtons();
+    injectProfilePageEnhancements();
+    injectPlaylistControlsEnhancements();
     checkHashRouting();
   });
   window.addEventListener('hashchange', checkHashRouting);
