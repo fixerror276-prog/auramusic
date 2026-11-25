@@ -42,6 +42,12 @@
     } catch {}
     applyGlobalPreferences();
   }
+  // expose for inline html handlers
+  window.auraSaveSettings = saveSettings;
+  window.auraSetLyricsOffset = function(v) {
+    settings.lyricsOffsetSec = parseFloat(v);
+    saveSettings();
+  };
 
   function toast(msg, type = 'success') {
     if (window.__auraToast) { window.__auraToast(msg); return; }
@@ -329,7 +335,15 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // 3. MOCHY STUDIO MODAL (AudioLab, Skins, Sleep Timer, Charts, Storage)
   // ═══════════════════════════════════════════════════════════════════════════
-  let _activeTab = 'audiolab'; // 'audiolab' | 'skins' | 'explore' | 'storage'
+  let _activeTab = 'audiolab'; // 'audiolab' | 'skins' | 'explore' | 'storage' | 'live'
+
+  // ── Live System State ─────────────────────────────────────────────────────
+  let _lyricsLines = [];           // [{time, text}]
+  let _lyricsInterval = null;      // synced ticker interval
+  let _liveRoomId = null;          // current room if hosting/listening
+  let _liveHostInterval = null;    // host sync interval
+  let _liveListenInterval = null;  // listener poll interval
+  let _liveIsHost = false;
 
   window.auraOpenMochyStudio = function(initialTab = 'audiolab') {
     _activeTab = initialTab;
@@ -359,7 +373,8 @@
       { id: 'audiolab', label: '🎛️ AudioLab & FX' },
       { id: 'skins', label: '🎨 Player Skins & Timer' },
       { id: 'explore', label: '📊 Charts & Moods' },
-      { id: 'storage', label: '💾 Storage & About' }
+      { id: 'storage', label: '💾 Storage & About' },
+      { id: 'live', label: '🔴 Live' }
     ];
 
     modal.innerHTML = `
@@ -567,6 +582,97 @@
               </div>
             `).join('')}
           </div>
+        </div>
+      `;
+    } else if (_activeTab === 'live') {
+      const lyricsActive = !!_lyricsInterval;
+      const inRoom = !!_liveRoomId;
+      const roomBadge = inRoom ? `<span class="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-black animate-pulse">🔴 ${_liveIsHost ? 'HOSTING' : 'LISTENING'}</span>` : '';
+
+      body.innerHTML = `
+        <!-- Synced Lyrics Ticker -->
+        <div class="rounded-3xl bg-[#0e1320] border border-white/[0.08] p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-black text-white">🎵 Synced Lyrics Ticker</h2>
+              <p class="text-xs text-slate-400 mt-0.5">Auto-synced LRC lyrics from LRCLib — floats above player</p>
+            </div>
+            ${lyricsActive ? '<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-black">● ACTIVE</span>' : ''}
+          </div>
+          <div class="flex gap-2 flex-wrap">
+            <button onclick="window.auraStartLiveLyrics()" class="px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-bold cursor-pointer">
+              ${lyricsActive ? '🔄 Reload Lyrics' : '▶ Show Live Lyrics'}
+            </button>
+            ${lyricsActive ? '<button onclick="window.auraStopLiveLyrics()" class="px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs font-bold cursor-pointer">✕ Stop Ticker</button>' : ''}
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider">Lines Loaded</div>
+              <div class="text-lg font-black text-white mt-0.5">${_lyricsLines.length || '—'}</div>
+            </div>
+            <div class="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider">Offset</div>
+              <div class="text-lg font-black text-emerald-400 mt-0.5">${settings.lyricsOffsetSec > 0 ? '+' : ''}${settings.lyricsOffsetSec}s</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="text-xs text-slate-400 font-bold shrink-0">Offset (s):</label>
+            <input type="range" min="-5" max="5" step="0.5" value="${settings.lyricsOffsetSec}"
+              oninput="window.auraSetLyricsOffset(this.value);this.nextElementSibling.textContent=parseFloat(this.value)+'s'"
+              class="flex-1 accent-emerald-500 h-1.5 rounded-full cursor-pointer" />
+            <span class="text-xs text-slate-300 w-10 text-right font-bold">${settings.lyricsOffsetSec}s</span>
+          </div>
+        </div>
+
+        <!-- Live Listen Together -->
+        <div class="rounded-3xl bg-[#0e1320] border border-white/[0.08] p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-black text-white">📡 Live Listen Together ${roomBadge}</h2>
+              <p class="text-xs text-slate-400 mt-0.5">Share a room code — friends join and hear in sync</p>
+            </div>
+          </div>
+          ${inRoom ? `
+            <div class="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-[10px] text-emerald-400 font-black uppercase tracking-wider">Room Code</div>
+                  <div class="text-2xl font-black text-white tracking-widest mt-0.5">${_liveRoomId}</div>
+                </div>
+                <button onclick="navigator.clipboard.writeText('${_liveRoomId}').then(function(){window.__auraToast&&window.__auraToast('Room code copied!')})" class="p-3 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] cursor-pointer text-slate-300">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+              <button onclick="window.auraLeaveRoom()" class="w-full py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs font-bold cursor-pointer">
+                ${_liveIsHost ? '✕ End Room' : '✕ Leave Room'}
+              </button>
+            </div>
+          ` : `
+            <div class="space-y-3">
+              <button onclick="window.auraCreateLiveRoom()" class="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 border border-emerald-500/30 text-sm font-black cursor-pointer">
+                🎙 Create Live Room (Host)
+              </button>
+              <div class="flex gap-2">
+                <input id="live-join-input" type="text" maxlength="12" placeholder="Enter room code…"
+                  class="flex-1 px-3 py-2.5 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white text-sm placeholder-slate-500 focus:outline-none focus:border-emerald-500/50" />
+                <button onclick="window.auraJoinLiveRoom(document.getElementById('live-join-input').value.trim())"
+                  class="px-4 py-2.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-xs font-bold cursor-pointer">
+                  Join
+                </button>
+              </div>
+            </div>
+          `}
+        </div>
+
+        <!-- How it works -->
+        <div class="rounded-3xl bg-[#0e1320] border border-white/[0.08] p-5 space-y-2">
+          <h3 class="text-sm font-black text-white">ℹ️ How it works</h3>
+          <ul class="text-xs text-slate-400 space-y-1.5 list-disc list-inside">
+            <li>Synced lyrics fetched from <span class="text-emerald-400">LRCLib</span> — word-perfect timing</li>
+            <li>Lyrics scroll auto-synced to current playback position</li>
+            <li><span class="text-emerald-400">Create Room</span> → share code → friends join → everyone hears the same song at the same position</li>
+            <li>Host controls playback; listeners auto-sync every 3 seconds</li>
+          </ul>
         </div>
       `;
     } else if (_activeTab === 'storage') {
@@ -889,6 +995,227 @@
       toast('Could not export cross-origin artwork', 'error');
     }
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 5b. LIVE SYSTEM — Synced Lyrics Ticker + Live Listen Together
+  // Inspired by Mochy Music Live features (GPL-3.0) — reimplemented in JS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── Lyrics Ticker ──────────────────────────────────────────────────────────
+  window.auraStartLiveLyrics = async function() {
+    const song = getCurrentSong();
+    if (!song || !song.name) return toast('Play a song first', 'error');
+    toast('Fetching synced lyrics…');
+    try {
+      const res = await fetch('/api/lyrics/live?title=' + encodeURIComponent(song.name) + '&artist=' + encodeURIComponent(song.artist || ''));
+      const data = await res.json();
+      if (!data.success || !data.lines || !data.lines.length) {
+        return toast('No synced lyrics found for this song', 'error');
+      }
+      _lyricsLines = data.lines;
+      renderLyricsTicker(_lyricsLines);
+      toast('Lyrics loaded — ' + _lyricsLines.length + ' lines');
+      // Refresh live tab UI if open
+      if (_activeTab === 'live') renderMochyTabContent();
+    } catch (err) {
+      toast('Lyrics fetch failed', 'error');
+    }
+  };
+
+  window.auraStopLiveLyrics = function() {
+    clearInterval(_lyricsInterval);
+    _lyricsInterval = null;
+    const ticker = document.getElementById('aura-lyrics-ticker');
+    if (ticker) ticker.remove();
+    if (_activeTab === 'live') renderMochyTabContent();
+  };
+
+  function renderLyricsTicker(lines) {
+    // Remove existing ticker
+    const existing = document.getElementById('aura-lyrics-ticker');
+    if (existing) existing.remove();
+    clearInterval(_lyricsInterval);
+
+    // Create ticker bar above player (player bar is ~64px, so bottom: 64px)
+    const ticker = document.createElement('div');
+    ticker.id = 'aura-lyrics-ticker';
+    ticker.style.cssText = [
+      'position:fixed', 'left:0', 'right:0', 'bottom:64px', 'z-index:24',
+      'background:linear-gradient(to right,rgba(7,8,12,0.95),rgba(16,185,129,0.12),rgba(7,8,12,0.95))',
+      'border-top:1px solid rgba(16,185,129,0.15)',
+      'padding:6px 48px 6px 12px', 'pointer-events:auto',
+      'display:flex', 'flex-direction:column', 'gap:2px'
+    ].join(';');
+
+    ticker.innerHTML = `
+      <button id="aura-lyrics-close" title="Close lyrics" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:rgba(255,255,255,0.4);font-size:16px;cursor:pointer;line-height:1;padding:4px;">✕</button>
+      <div id="aura-lyrics-line1" style="font-size:12px;font-weight:800;color:#10b981;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 0.3s;line-height:1.3;">♪ Ready</div>
+      <div id="aura-lyrics-line2" style="font-size:10px;color:rgba(255,255,255,0.4);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;"></div>
+    `;
+    document.body.appendChild(ticker);
+
+    document.getElementById('aura-lyrics-close').onclick = function() {
+      window.auraStopLiveLyrics();
+    };
+
+    function updateTicker() {
+      const a = getMainAudio();
+      if (!a || !lines.length) return;
+      const t = a.currentTime + (settings.lyricsOffsetSec || 0);
+      let cur = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].time <= t) cur = i; else break;
+      }
+      const line1 = document.getElementById('aura-lyrics-line1');
+      const line2 = document.getElementById('aura-lyrics-line2');
+      if (!line1) return;
+      if (cur >= 0) {
+        const curText = lines[cur].text || '';
+        const nextText = lines[cur + 1] ? lines[cur + 1].text : '';
+        if (line1.textContent !== curText) {
+          line1.style.opacity = '0';
+          setTimeout(function() { line1.textContent = curText; line1.style.opacity = '1'; }, 150);
+        }
+        line2.textContent = nextText;
+      } else {
+        line1.textContent = '♪ ' + (getCurrentSong() ? getCurrentSong().name || '' : '');
+        line2.textContent = '';
+      }
+    }
+
+    _lyricsInterval = setInterval(updateTicker, 300);
+    updateTicker();
+  }
+
+  // ── Live Listen Together ────────────────────────────────────────────────────
+  function getLiveUserId() {
+    try {
+      const u = JSON.parse(localStorage.getItem('auramusic_user') || 'null');
+      if (u) return u.id || u._id || u.email || 'anon';
+    } catch {}
+    return 'anon_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function getLiveUserName() {
+    try {
+      const u = JSON.parse(localStorage.getItem('auramusic_user') || 'null');
+      if (u) return u.displayName || u.name || u.email || 'Anonymous';
+    } catch {}
+    return 'Anonymous';
+  }
+
+  window.auraCreateLiveRoom = async function() {
+    const song = getCurrentSong();
+    if (!song || !song.name) return toast('Play a song first to create a live room', 'error');
+    const a = getMainAudio();
+    try {
+      const res = await fetch('/api/live/room/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: getLiveUserId(),
+          hostName: getLiveUserName(),
+          song: song,
+          positionSec: a ? a.currentTime : 0,
+          isPlaying: a ? !a.paused : false
+        })
+      });
+      const data = await res.json();
+      if (!data.success) return toast(data.error || 'Failed to create room', 'error');
+      _liveRoomId = data.roomId;
+      _liveIsHost = true;
+      toast('🔴 Live room created: ' + _liveRoomId);
+      // Start host sync every 3s
+      clearInterval(_liveHostInterval);
+      _liveHostInterval = setInterval(function() {
+        const au = getMainAudio();
+        fetch('/api/live/room/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId: _liveRoomId,
+            userId: getLiveUserId(),
+            positionSec: au ? au.currentTime : 0,
+            isPlaying: au ? !au.paused : false,
+            song: getCurrentSong()
+          })
+        }).catch(function() {});
+      }, 3000);
+      showLiveBadge(true);
+      if (_activeTab === 'live') renderMochyTabContent();
+    } catch (err) {
+      toast('Could not create room', 'error');
+    }
+  };
+
+  window.auraJoinLiveRoom = async function(roomId) {
+    if (!roomId) return toast('Enter a room code', 'error');
+    try {
+      const res = await fetch('/api/live/room?id=' + encodeURIComponent(roomId));
+      const data = await res.json();
+      if (!data.success) return toast(data.error || 'Room not found', 'error');
+      _liveRoomId = roomId;
+      _liveIsHost = false;
+      toast('📡 Joined live room: ' + roomId);
+
+      function syncFromHost() {
+        fetch('/api/live/room?id=' + encodeURIComponent(roomId))
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (!d.success) return;
+            const au = getMainAudio();
+            const song = d.room.song;
+            const curSong = getCurrentSong();
+            // Load new song if different
+            if (song && au && (!curSong || curSong.videoId !== song.videoId)) {
+              if (window.auraPlayVideo) window.auraPlayVideo(song.videoId, song.name, song.artist, song.image);
+            }
+            // Seek to live position (allow ±2s tolerance)
+            if (au && Math.abs(au.currentTime - d.room.livePositionSec) > 2) {
+              au.currentTime = d.room.livePositionSec;
+            }
+            if (au) {
+              if (d.room.isPlaying && au.paused) au.play().catch(function() {});
+              else if (!d.room.isPlaying && !au.paused) au.pause();
+            }
+          }).catch(function() {});
+      }
+
+      clearInterval(_liveListenInterval);
+      syncFromHost();
+      _liveListenInterval = setInterval(syncFromHost, 3000);
+      showLiveBadge(false);
+      if (_activeTab === 'live') renderMochyTabContent();
+    } catch (err) {
+      toast('Could not join room', 'error');
+    }
+  };
+
+  window.auraLeaveRoom = function() {
+    clearInterval(_liveHostInterval);
+    clearInterval(_liveListenInterval);
+    _liveHostInterval = null;
+    _liveListenInterval = null;
+    _liveRoomId = null;
+    _liveIsHost = false;
+    removeLiveBadge();
+    toast('Left live room');
+    if (_activeTab === 'live') renderMochyTabContent();
+  };
+
+  function showLiveBadge(isHost) {
+    removeLiveBadge();
+    const badge = document.createElement('div');
+    badge.id = 'aura-live-badge';
+    badge.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:50;background:rgba(239,68,68,0.9);color:#fff;font-size:11px;font-weight:900;letter-spacing:0.08em;padding:4px 12px;border-radius:999px;pointer-events:none;animation:pulse 2s infinite;';
+    badge.textContent = isHost ? '🔴 LIVE HOST' : '🔴 LIVE';
+    document.body.appendChild(badge);
+  }
+
+  function removeLiveBadge() {
+    const b = document.getElementById('aura-live-badge');
+    if (b) b.remove();
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 6. SIDEBAR / 3-LINE MENU INJECTION & VINYL SKIN SYNC

@@ -2881,6 +2881,79 @@ async function searchYouTube(query) {
       }
 
       
+      // ─── Live Synced Lyrics (Mochy LRCLib Provider) ────────────────────────
+      if (pathname === '/api/lyrics/live' && req.method === 'GET') {
+        const title = (parsedUrl.searchParams.get('title') || '').split('|')[0].replace(/\(.*?\)|\[.*?\]/g, '').trim();
+        const artist = (parsedUrl.searchParams.get('artist') || '').split(',')[0].trim();
+        if (!title) return sendJson(res, 200, { success: false, lines: [] });
+        try {
+          const lrcRes = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`, {
+            headers: { 'User-Agent': 'AuraMusic/1.0' },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (lrcRes.ok) {
+            const list = await lrcRes.json();
+            const match = Array.isArray(list) ? list.find(x => x.syncedLyrics) || list[0] : null;
+            if (match && match.syncedLyrics) {
+              const lines = [];
+              for (const raw of match.syncedLyrics.split('\n')) {
+                const m = raw.match(/\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)/);
+                if (m) {
+                  const sec = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+                  const text = m[3].trim();
+                  if (text) lines.push({ time: sec, text });
+                }
+              }
+              return sendJson(res, 200, { success: true, synced: true, lines });
+            }
+          }
+        } catch {}
+        return sendJson(res, 200, { success: false, synced: false, lines: [] });
+      }
+
+      // ─── Live Listen Together Room System ──────────────────────────────────
+      if (!memoryDb.liveRooms) memoryDb.liveRooms = {};
+      if (pathname === '/api/live/room/create' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const roomId = 'live_' + crypto.randomBytes(3).toString('hex');
+        memoryDb.liveRooms[roomId] = {
+          roomId,
+          hostId: b.userId || 'guest',
+          hostName: b.hostName || 'Aura Host',
+          song: b.song || null,
+          positionSec: Number(b.positionSec || 0),
+          isPlaying: Boolean(b.isPlaying),
+          listeners: 1,
+          updatedAt: Date.now()
+        };
+        return sendJson(res, 200, { success: true, room: memoryDb.liveRooms[roomId] });
+      }
+
+      if (pathname === '/api/live/room/sync' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const room = memoryDb.liveRooms[String(b.roomId || '')];
+        if (!room) return sendJson(res, 404, { success: false, error: 'Live room not found' });
+        if (b.song) room.song = b.song;
+        if (b.positionSec !== undefined) room.positionSec = Number(b.positionSec);
+        if (b.isPlaying !== undefined) room.isPlaying = Boolean(b.isPlaying);
+        room.updatedAt = Date.now();
+        return sendJson(res, 200, { success: true, room });
+      }
+
+      if (pathname === '/api/live/room' && req.method === 'GET') {
+        const roomId = String(parsedUrl.searchParams.get('id') || '');
+        const room = memoryDb.liveRooms[roomId];
+        if (!room) return sendJson(res, 404, { success: false, error: 'Live room ended or not found' });
+        const elapsed = room.isPlaying ? (Date.now() - room.updatedAt) / 1000 : 0;
+        return sendJson(res, 200, {
+          success: true,
+          room: {
+            ...room,
+            livePositionSec: Number((room.positionSec + elapsed).toFixed(2))
+          }
+        });
+      }
+
       // Verify Key 1 (Portal Gate Key)
       if (pathname === '/api/admin/verify-portal-key' && req.method === 'POST') {
         const b = await parseBody(req);
