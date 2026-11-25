@@ -114,9 +114,74 @@ async function invidiousExtract(instance, id) {
   return { url: best.url, source: `invidious:${new URL(instance).hostname}` };
 }
 
+// Mochy-Music InnerTube direct player extractor (ANDROID_VR & IOS — <300ms unciphered audio streams)
+const MOCHY_INNERTUBE_CLIENTS = [
+  {
+    name: 'ANDROID_VR',
+    context: {
+      client: {
+        clientName: 'ANDROID_VR',
+        clientVersion: '1.61.48',
+        osName: 'Android',
+        osVersion: '12',
+        deviceMake: 'Oculus',
+        deviceModel: 'Quest 3',
+        androidSdkVersion: '32',
+        hl: 'en',
+        gl: 'US'
+      }
+    },
+    ua: 'com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)'
+  },
+  {
+    name: 'IOS',
+    context: {
+      client: {
+        clientName: 'IOS',
+        clientVersion: '21.03.1',
+        osName: 'iOS',
+        osVersion: '18.2.22C152',
+        hl: 'en',
+        gl: 'US'
+      }
+    },
+    ua: 'com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)'
+  }
+];
+
+async function mochyInnerTubeExtract(clientCfg, id) {
+  const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': clientCfg.ua
+    },
+    body: JSON.stringify({
+      videoId: id,
+      context: clientCfg.context,
+      contentCheckOk: true,
+      racyCheckOk: true
+    }),
+    signal: AbortSignal.timeout(2500)
+  });
+  if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
+  const data = await res.json();
+  const formats = (data.streamingData?.adaptiveFormats || []).filter(
+    f => /^audio\//i.test(f.mimeType || '') && isHttpUrl(f.url)
+  );
+  const best = pickBest(
+    formats,
+    f => f.bitrate || f.averageBitrate || 0,
+    f => /audio\/mp4/i.test(f.mimeType || '')
+  );
+  if (!best) throw new Error('no innertube audio format');
+  return { url: best.url, source: `innertube:${clientCfg.name}` };
+}
+
 // First instance that answers wins.
 function portableExtract(id) {
   const attempts = [
+    ...MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id)),
     ...PIPED_INSTANCES.map(i => pipedExtract(i, id)),
     ...INVIDIOUS_INSTANCES.map(i => invidiousExtract(i, id))
   ];

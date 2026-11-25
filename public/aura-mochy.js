@@ -93,6 +93,28 @@
     }
     #aura-mochy-modal, #aura-mochy-skin-overlay, #aura-mochy-share-modal {
       background: #07080c !important;
+      max-width: 100vw !important;
+      overflow-x: hidden !important;
+    }
+    /* Mobile-friendly visible range sliders */
+    #aura-mochy-modal input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      background: rgba(255,255,255,0.14);
+      border-radius: 999px;
+      outline: none;
+    }
+    #aura-mochy-modal input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #10b981;
+      border: 2px solid #fff;
+      cursor: pointer;
     }
     /* iPod Click Wheel */
     .mochy-ipod-shell {
@@ -358,15 +380,15 @@
         </button>
       </div>
 
-      <!-- Tabs Bar -->
-      <div class="px-4 sm:px-6 py-3 border-b border-white/[0.06] bg-[#090b12] flex items-center space-x-2 overflow-x-auto shrink-0">
+      <!-- Tabs Bar (Wraps cleanly on mobile so nothing overflows) -->
+      <div class="px-3 sm:px-6 py-2.5 border-b border-white/[0.06] bg-[#090b12] flex flex-wrap items-center gap-1.5 shrink-0">
         ${tabs.map(t => `
-          <button onclick="window.auraSwitchMochyTab('${t.id}')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer ${_activeTab === t.id ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'bg-white/[0.04] text-slate-400 hover:text-white'}">${t.label}</button>
+          <button onclick="window.auraSwitchMochyTab('${t.id}')" class="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer ${_activeTab === t.id ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'bg-white/[0.04] text-slate-400 hover:text-white'}">${t.label}</button>
         `).join('')}
       </div>
 
       <!-- Content -->
-      <div id="aura-mochy-body" class="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 pb-32 max-w-5xl mx-auto w-full space-y-6"></div>
+      <div id="aura-mochy-body" class="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 md:p-8 pb-32 max-w-5xl mx-auto w-full space-y-4 sm:space-y-6"></div>
     `;
   }
 
@@ -403,13 +425,15 @@
             `).join('')}
           </div>
 
-          <!-- 5 Band Sliders -->
-          <div class="grid grid-cols-5 gap-3 pt-2">
+          <!-- 5 Band Sliders (2-col on phone, 5-col on desktop so zero horizontal overflow) -->
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2">
             ${EQ_LABELS.map((lbl, idx) => `
               <div class="flex flex-col items-center space-y-2 p-2.5 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
-                <span class="text-[11px] font-mono text-emerald-400 font-bold" id="mochy-eq-val-${idx}">${settings.eqBands[idx] > 0 ? '+' : ''}${settings.eqBands[idx]}dB</span>
+                <div class="w-full flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400 font-bold">${lbl}</span>
+                  <span class="font-mono text-emerald-400 font-bold" id="mochy-eq-val-${idx}">${settings.eqBands[idx] > 0 ? '+' : ''}${settings.eqBands[idx]}dB</span>
+                </div>
                 <input type="range" min="-12" max="12" step="1" value="${settings.eqBands[idx]}" oninput="window.auraSetEqBand(${idx}, this.value)" class="w-full accent-emerald-500 cursor-pointer" />
-                <span class="text-[10px] text-slate-400 font-bold">${lbl}</span>
               </div>
             `).join('')}
           </div>

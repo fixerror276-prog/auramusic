@@ -1043,19 +1043,19 @@
         <div class="flex items-center space-x-4">
           <div class="relative group">
             <img id="aura-edit-avatar-preview" src="${currentAvatar}" alt="Profile Avatar" class="w-20 h-20 rounded-2xl object-cover ring-2 ring-emerald-500/40 bg-slate-900 pointer-events-none" />
-            <button onclick="document.getElementById('aura-avatar-file-input').click()" class="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-bold text-white">
+            <label for="aura-avatar-file-input" class="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-[10px] font-bold text-white">
               <svg class="w-4 h-4 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
               <span>Change</span>
-            </button>
+            </label>
           </div>
           <div class="space-y-1.5">
             <div class="text-xs font-bold text-white">Profile Photo</div>
-            <p class="text-[11px] text-slate-400">Upload any JPG, PNG, or WEBP. You can crop and reposition it.</p>
+            <p class="text-[11px] text-slate-400">Upload any photo from your gallery. You can crop and reposition it.</p>
             <div class="flex items-center space-x-2 pt-1">
-              <button onclick="document.getElementById('aura-avatar-file-input').click()" class="py-1 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold cursor-pointer">Upload Photo</button>
+              <label for="aura-avatar-file-input" class="py-1 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold cursor-pointer">Upload Photo</label>
               <button onclick="window.auraResetProfilePhoto()" class="py-1 px-3 rounded-lg bg-white/[0.04] hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-white/10 text-xs font-bold cursor-pointer">Remove</button>
             </div>
-            <input type="file" id="aura-avatar-file-input" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="window.auraHandleAvatarFileSelect(this)" />
+            <input type="file" id="aura-avatar-file-input" accept="image/*" style="position:fixed;left:-9999px;opacity:0;" onchange="window.auraHandleAvatarFileSelect(this)" />
           </div>
         </div>
 
@@ -1163,14 +1163,12 @@
     if (!input.files || !input.files[0]) return;
     const file = input.files[0];
 
-    // File validation: JPG, PNG, WEBP, max 5MB
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(file.type.toLowerCase())) {
-      toast('Please choose a valid JPG, JPEG, PNG, or WEBP image.', 'error');
+    if (file.type && !file.type.toLowerCase().startsWith('image/')) {
+      toast('Please choose a valid image from your gallery.', 'error');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast('Image exceeds maximum allowed size of 5MB.', 'error');
+    if (file.size > 10 * 1024 * 1024) {
+      toast('Image exceeds maximum allowed size of 10MB.', 'error');
       return;
     }
 
@@ -1323,14 +1321,16 @@
     const canvas = document.getElementById('aura-crop-canvas');
     if (!canvas) return;
 
-    // Export 300x300 high-res image matching exact 1:1 aspect ratio
+    // Export 300x300 JPEG (fast <40KB upload on mobile)
     const outCanvas = document.createElement('canvas');
     outCanvas.width = 300;
     outCanvas.height = 300;
     const outCtx = outCanvas.getContext('2d');
+    outCtx.fillStyle = '#090a0f';
+    outCtx.fillRect(0, 0, 300, 300);
     outCtx.drawImage(canvas, 0, 0, 300, 300);
 
-    const base64Data = outCanvas.toDataURL('image/png', 0.95);
+    const base64Data = outCanvas.toDataURL('image/jpeg', 0.88);
     const currentUserId = getUserId();
 
     toast('Uploading and saving photo...');
@@ -1605,30 +1605,18 @@
       const avatarWrapper = img.parentElement;
       if (avatarWrapper && !avatarWrapper.querySelector('#aura-avatar-gallery-btn')) {
         avatarWrapper.style.position = 'relative';
-        const camBtn = document.createElement('button');
-        camBtn.id = 'aura-avatar-gallery-btn';
-        camBtn.title = 'Upload Photo from Gallery';
-        camBtn.className = 'absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl border-2 border-[#090a0f] cursor-pointer active:scale-95 z-20 transition-transform';
-        camBtn.innerHTML = `
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        const camLabel = document.createElement('label');
+        camLabel.id = 'aura-avatar-gallery-btn';
+        camLabel.title = 'Upload Photo from Gallery';
+        camLabel.className = 'absolute -bottom-1.5 -right-1.5 w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center shadow-xl border-2 border-[#090a0f] cursor-pointer active:scale-95 z-20 transition-transform overflow-hidden';
+        camLabel.innerHTML = `
+          <svg class="w-4 h-4 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
           </svg>
+          <input type="file" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" onchange="window.auraHandleAvatarFileSelect(this)" />
         `;
-        camBtn.onclick = (e) => {
-          e.stopPropagation();
-          let fileInp = document.getElementById('aura-direct-gallery-input');
-          if (!fileInp) {
-            fileInp = document.createElement('input');
-            fileInp.type = 'file';
-            fileInp.id = 'aura-direct-gallery-input';
-            fileInp.accept = 'image/jpeg,image/png,image/webp';
-            fileInp.style.display = 'none';
-            fileInp.onchange = function() { window.auraHandleAvatarFileSelect(this); };
-            document.body.appendChild(fileInp);
-          }
-          fileInp.click();
-        };
-        avatarWrapper.appendChild(camBtn);
+        camLabel.onclick = (e) => e.stopPropagation();
+        avatarWrapper.appendChild(camLabel);
       }
 
       // 3. Display saved Bio under Display Name if not already shown
@@ -1706,13 +1694,13 @@
         <button id="aura-pl-vis-toggle-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${isPublic ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' : 'bg-white/[0.06] text-slate-300 border-white/15'}">
           <span>${isPublic ? '🌐 Public (In Community)' : '🔒 Private (Only You)'}</span>
         </button>
-        <button id="aura-pl-cover-gallery-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-bold text-slate-200 cursor-pointer">
+        <label for="aura-pl-cover-input" id="aura-pl-cover-gallery-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-bold text-slate-200 cursor-pointer">
           <span>🖼️ Change Cover</span>
-        </button>
+        </label>
         <button id="aura-pl-share-btn" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-xs font-bold text-slate-200 cursor-pointer ${isPublic ? '' : 'hidden'}">
           <span>🔗 Share</span>
         </button>
-        <input type="file" id="aura-pl-cover-input" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+        <input type="file" id="aura-pl-cover-input" accept="image/*" style="position:fixed;left:-9999px;opacity:0;" />
       `;
       h1.insertAdjacentElement('afterend', bar);
 
@@ -1750,19 +1738,17 @@
       // Share handler
       shareBtn.onclick = () => window.auraSharePlaylist(plId, encodeURIComponent(matchedPl.name));
 
-      // Gallery cover upload handler
-      const coverBtn = bar.querySelector('#aura-pl-cover-gallery-btn');
+      // Gallery cover upload handler (native <label> triggers picker on Android WebView)
       const coverInput = bar.querySelector('#aura-pl-cover-input');
-      coverBtn.onclick = () => coverInput.click();
       coverInput.onchange = function() {
         if (!this.files || !this.files[0]) return;
         const file = this.files[0];
-        if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type.toLowerCase())) {
-          toast('Supported formats: JPG, JPEG, PNG, WEBP.', 'error');
+        if (file.type && !file.type.toLowerCase().startsWith('image/')) {
+          toast('Please select a valid image from your gallery.', 'error');
           return;
         }
-        if (file.size > 5 * 1024 * 1024) {
-          toast('Image exceeds 5MB limit.', 'error');
+        if (file.size > 10 * 1024 * 1024) {
+          toast('Image exceeds 10MB limit.', 'error');
           return;
         }
         const reader = new FileReader();
@@ -1815,6 +1801,40 @@
       }
     }
   }
+
+  // Instant Playlist Delete Interceptor for Library .glass-card trash button
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('main .glass-card button');
+    if (!btn) return;
+    // Check if this button is the delete/trash button inside the playlist card
+    const card = btn.closest('.glass-card');
+    if (!card) return;
+    const isTrash = btn.querySelector('svg path[d*="M3 6h18"], svg polyline[points*="3 6 5 6"], svg path[d*="19 6v14"]') || btn.title?.toLowerCase().includes('delete');
+    if (!isTrash) return;
+
+    const titleEl = card.querySelector('h3, h2, .font-bold');
+    const plName = (titleEl?.textContent || '').trim();
+    if (!plName) return;
+
+    try {
+      let cached = JSON.parse(localStorage.getItem('auramusic_cached_playlists') || '[]');
+      const target = cached.find(p => (p.name || '').trim().toLowerCase() === plName.toLowerCase());
+      const plId = target ? String(target.id || target._id || '') : '';
+      cached = cached.filter(p => (p.name || '').trim().toLowerCase() !== plName.toLowerCase());
+      localStorage.setItem('auramusic_cached_playlists', JSON.stringify(cached));
+
+      // Remove card visually right away
+      card.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+      card.style.opacity = '0';
+      card.style.transform = 'scale(0.92)';
+      setTimeout(() => card.remove(), 160);
+
+      const uid = getUserId();
+      fetch(`/api/playlists?id=${encodeURIComponent(plId)}&name=${encodeURIComponent(plName)}&userId=${encodeURIComponent(uid)}`, {
+        method: 'DELETE'
+      }).catch(() => {});
+    } catch {}
+  }, true);
 
   // Auto-close Community / Creator Profile / Playlist Detail when user taps any bottom nav or header navigation item
   document.addEventListener('click', (e) => {
