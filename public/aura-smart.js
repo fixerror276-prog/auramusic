@@ -3027,24 +3027,16 @@
       return email === 'admin@admin.com' || role === 'admin' || sessionStorage.getItem('auramusic_admin_logged') === 'true' || sessionStorage.getItem('auramusic_portal_unlocked') === 'true';
     }
 
-    function injectTasteHeaderButton() {
-      // Normal user ko nahi dikhana: user ka taste silently improve hoga
-      if (!isAdminUser()) {
-        const existing = document.getElementById('aura-header-dna-btn');
-        if (existing) existing.remove();
-        return;
+    // Old Music Taste DNA modal removed — replaced by Mochy Charts & Moods Explorer (storage/history kept)
+    window.auraShowTasteDashboard = function() {
+      if (typeof window.auraOpenMochyStudio === 'function') {
+        window.auraOpenMochyStudio('explore');
       }
+    };
 
-      const headerActions = document.querySelector('header div[class*="flex items-center space-x"], header div[class*="flex items-center gap"]');
-      if (headerActions && !document.getElementById('aura-header-dna-btn')) {
-        const dnaBtn = document.createElement('button');
-        dnaBtn.id = 'aura-header-dna-btn';
-        dnaBtn.title = 'Admin Panel: View Users Taste DNA & Personalized Analytics';
-        dnaBtn.className = 'px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600 hover:to-pink-600 border border-purple-500/40 text-purple-200 hover:text-white transition-all flex items-center space-x-1.5 shadow-sm';
-        dnaBtn.innerHTML = `<span>🧬</span><span class="hidden sm:inline">Admin Taste DNA</span>`;
-        dnaBtn.onclick = () => window.auraShowTasteDashboard();
-        headerActions.insertBefore(dnaBtn, headerActions.firstChild);
-      }
+    function injectTasteHeaderButton() {
+      const existing = document.getElementById('aura-header-dna-btn');
+      if (existing) existing.remove();
     }
 
     // ────────────────────────────────────────────────────────────────────────

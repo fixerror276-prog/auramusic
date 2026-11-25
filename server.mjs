@@ -1258,9 +1258,9 @@ async function searchYouTube(query) {
 
           let personalizedPool = [];
           if (topFavArtists.length > 0) {
-            // Dynamic rotation based on current minute so every reopen gives a fresh mix!
+            // Dynamic rotation based on current minute using Mochy YT Music InnerTube + stored history
             const artistPick = topFavArtists[Math.floor(Date.now() / 60000) % topFavArtists.length];
-            personalizedPool = await searchYTCached(`${artistPick} hit songs`, 1500).catch(() => []);
+            personalizedPool = await searchYTMusicInnerTube(`${artistPick} hit songs`).catch(() => []);
           }
 
           const seenIds = new Set(custom.map(c => c.videoId));
