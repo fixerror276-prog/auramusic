@@ -1,34 +1,12 @@
-// Finds a playable audio URL for a YouTube video id.
-//
-// Why this exists: the old code asked ytdl-core for a googlevideo URL and handed it to
-// the browser. That URL is locked to the IP address of the server that extracted it, so
-// when the server is on a host like Vercel and the phone is on its own network, playback
-// fails and the app silently fell back to the YouTube iframe (slow, and it stops when the
-// screen locks). Here we:
-//   * cache results so repeat plays are instant,
-//   * check whether the extracted URL will work for the requesting client,
-//   * fall back to Piped / Invidious instances, whose proxied URLs work from any network,
-//   * keep every network call on a short timeout.
+// Pure Mochy InnerTube Audio & Video Extractor
+// Uses YouTube InnerTube (ANDROID_VR / IOS) for <300ms unciphered audio/video streams
+// and YT Music InnerTube (WEB_REMIX) for related/up-next radio tracks.
 
-const splitList = (value, fallback) =>
-  (value || fallback).split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
-
-const PIPED_INSTANCES = splitList(
-  process.env.PIPED_INSTANCES,
-  'https://pipedapi.kavin.rocks,https://pipedapi.adminforge.de,https://api.piped.private.coffee'
-);
-const INVIDIOUS_INSTANCES = splitList(
-  process.env.INVIDIOUS_INSTANCES,
-  'https://inv.nadeko.net,https://yewtu.be'
-);
-
-const RELATED_TIMEOUT_MS = 4000;
+const INNERTUBE_TIMEOUT_MS = 2500;
+const VIDEO_TIMEOUT_MS = 4500;
+const RELATED_TIMEOUT_MS = 3500;
+const STREAM_TTL_MS = 60 * 60 * 1000;
 const RELATED_TTL_MS = 30 * 60 * 1000;
-const YTDL_TIMEOUT_MS = 4000;
-const PORTABLE_TIMEOUT_MS = 3000;  // faster timeout for Piped/Invidious
-const HEDGE_DELAY_MS = 0;          // race ALL sources simultaneously – fastest wins
-const YTDL_TTL_MS = 4 * 60 * 60 * 1000;      // googlevideo URLs live ~6h
-const PORTABLE_TTL_MS = 60 * 60 * 1000;
 
 const cache = new Map(); // key -> { value, expires }
 
@@ -56,7 +34,7 @@ function isHttpUrl(value) {
   return typeof value === 'string' && /^https?:\/\//i.test(value);
 }
 
-// Prefer AAC/MP4 (plays everywhere, including iPhones); otherwise the highest bitrate.
+// Prefer AAC/MP4 (plays everywhere, including iOS/Android); otherwise highest bitrate.
 function pickBest(items, getBitrate, isMp4) {
   if (!items.length) return null;
   const byBitrate = (a, b) => getBitrate(b) - getBitrate(a);
@@ -64,57 +42,7 @@ function pickBest(items, getBitrate, isMp4) {
   return (mp4[0] || [...items].sort(byBitrate)[0]) || null;
 }
 
-async function ytdlExtract(client, id) {
-  const info = await client.getInfo(`https://www.youtube.com/watch?v=${id}`);
-  const audio = (info.formats || []).filter(f => f.hasAudio && !f.hasVideo && isHttpUrl(f.url));
-  const best = pickBest(
-    audio,
-    f => f.audioBitrate || f.bitrate || 0,
-    f => /audio\/mp4/i.test(f.mimeType || '') || f.container === 'mp4'
-  );
-  if (!best) throw new Error('no audio format found');
-  return best.url;
-}
-
-async function fetchJson(url, ms) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 AuraMusic', Accept: 'application/json' },
-    signal: AbortSignal.timeout(ms)
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-async function pipedExtract(instance, id) {
-  const data = await fetchJson(`${instance}/streams/${encodeURIComponent(id)}`, PORTABLE_TIMEOUT_MS);
-  const streams = (data.audioStreams || []).filter(s => isHttpUrl(s.url));
-  const best = pickBest(
-    streams,
-    s => s.bitrate || 0,
-    s => /mp4|m4a/i.test(s.mimeType || '') || /m4a/i.test(s.format || '')
-  );
-  if (!best) throw new Error('no audio stream');
-  return { url: best.url, source: `piped:${new URL(instance).hostname}` };
-}
-
-async function invidiousExtract(instance, id) {
-  const data = await fetchJson(
-    `${instance}/api/v1/videos/${encodeURIComponent(id)}?local=true&fields=adaptiveFormats`,
-    PORTABLE_TIMEOUT_MS
-  );
-  const formats = (data.adaptiveFormats || []).filter(
-    f => /^audio\//i.test(f.type || '') && isHttpUrl(f.url)
-  );
-  const best = pickBest(
-    formats,
-    f => parseInt(f.bitrate, 10) || 0,
-    f => /audio\/mp4/i.test(f.type || '')
-  );
-  if (!best) throw new Error('no audio format');
-  return { url: best.url, source: `invidious:${new URL(instance).hostname}` };
-}
-
-// Mochy-Music InnerTube direct player extractor (ANDROID_VR & IOS — <300ms unciphered audio streams)
+// Mochy-Music InnerTube direct player clients (ANDROID_VR & IOS — <300ms unciphered streams)
 const MOCHY_INNERTUBE_CLIENTS = [
   {
     name: 'ANDROID_VR',
@@ -162,7 +90,7 @@ async function mochyInnerTubeExtract(clientCfg, id) {
       contentCheckOk: true,
       racyCheckOk: true
     }),
-    signal: AbortSignal.timeout(2500)
+    signal: AbortSignal.timeout(INNERTUBE_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
   const data = await res.json();
@@ -194,12 +122,14 @@ export async function resolveVideo(id) {
         contentCheckOk: true,
         racyCheckOk: true
       }),
-      signal: AbortSignal.timeout(4500)
+      signal: AbortSignal.timeout(VIDEO_TIMEOUT_MS)
     });
     if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
     const data = await res.json();
     const prog = (data.streamingData?.formats || []).filter(f => /video\/mp4/i.test(f.mimeType || '') && isHttpUrl(f.url));
-    const adaptive = (data.streamingData?.adaptiveFormats || []).filter(f => /video\/mp4/i.test(f.mimeType || '') && /avc1/i.test(f.mimeType || '') && isHttpUrl(f.url));
+    const adaptive = (data.streamingData?.adaptiveFormats || []).filter(
+      f => /video\/mp4/i.test(f.mimeType || '') && /avc1/i.test(f.mimeType || '') && isHttpUrl(f.url)
+    );
     const pick = prog.sort((a, b) => (b.height || 0) - (a.height || 0))[0]
               || adaptive.filter(f => (f.height || 0) <= 720 && (f.height || 0) >= 360).sort((a, b) => (b.height || 0) - (a.height || 0))[0]
               || adaptive[0];
@@ -209,18 +139,11 @@ export async function resolveVideo(id) {
 
   try {
     const found = await Promise.any(MOCHY_INNERTUBE_CLIENTS.map(c => extract(c)));
-    setCached(key, found, PORTABLE_TTL_MS);
+    setCached(key, found, STREAM_TTL_MS);
     return found;
   } catch {
     return null;
   }
-}
-
-// Mochy InnerTube only — fastest (<300ms) unciphered audio streams.
-function portableExtract(id) {
-  const attempts = MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id));
-  if (!attempts.length) return Promise.reject(new Error('no innertube clients configured'));
-  return Promise.any(attempts);
 }
 
 function normaliseIp(ip) {
@@ -238,14 +161,10 @@ export function urlWorksForClient(url, clientIp) {
   try { lockedIp = new URL(url).searchParams.get('ip') || ''; } catch { return true; }
   if (!lockedIp) return true;
   const client = normaliseIp(clientIp);
-  if (!client || client === '127.0.0.1' || client === '::1') return true; // server and browser on one machine
+  if (!client || client === '127.0.0.1' || client === '::1') return true;
   return normaliseIp(lockedIp) === client;
 }
 
-const looksLikeDatacenter = () =>
-  Boolean(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
-
-// Concurrent callers for the same id (e.g. a prefetch and the real play) share one lookup.
 const inflight = new Map();
 function dedupe(key, factory) {
   if (inflight.has(key)) return inflight.get(key);
@@ -254,79 +173,45 @@ function dedupe(key, factory) {
   return p;
 }
 
-async function getYtdlUrl(client, id) {
-  const key = `ytdl:${id}`;
+async function getInnerTubeAudio(id) {
+  const key = `innertube:${id}`;
   const cached = getCached(key);
   if (cached) return cached;
   return dedupe(key, async () => {
-    const url = await withTimeout(ytdlExtract(client, id), YTDL_TIMEOUT_MS, 'ytdl');
-    setCached(key, url, YTDL_TTL_MS);
-    return url;
-  });
-}
-
-// The raw (cached) URL from ytdl, for the server's own streaming proxy. Throws if none can be found.
-export function getDirectAudioUrl(client, id) {
-  return getYtdlUrl(client, id);
-}
-
-export function forgetDirectAudioUrl(id) {
-  cache.delete(`ytdl:${id}`);
-}
-
-async function getPortable(id) {
-  const key = `portable:${id}`;
-  const cached = getCached(key);
-  if (cached) return cached;
-  return dedupe(key, async () => {
-    const found = await withTimeout(portableExtract(id), PORTABLE_TIMEOUT_MS + 500, 'fallback');
-    setCached(key, found, PORTABLE_TTL_MS);
+    const found = await withTimeout(
+      Promise.any(MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id))),
+      INNERTUBE_TIMEOUT_MS + 500,
+      'innertube'
+    );
+    setCached(key, found, STREAM_TTL_MS);
     return found;
   });
 }
 
-// Resolves with the first truthy value, or null once every promise has settled without one.
-function firstUseful(promises) {
-  return new Promise(resolve => {
-    let pending = promises.length;
-    if (!pending) return resolve(null);
-    const settle = v => {
-      if (v) resolve(v);
-      else if (--pending === 0) resolve(null);
-    };
-    for (const p of promises) p.then(settle, () => settle(null));
-  });
-}
-
-// Fills the caches ahead of time using Mochy InnerTube so the first tap on a song is instant.
-export function warmAudio(client, ids) {
+// Fills the cache ahead of time using Mochy InnerTube so the first tap on a song is instant.
+export function warmAudio(ids) {
+  if (!Array.isArray(ids)) return;
   for (const id of ids) {
     if (!id) continue;
-    getPortable(id).catch(() => {});
+    getInnerTubeAudio(id).catch(() => {});
   }
 }
 
-// Returns { streamUrl, source } or null.
-// Primary: Mochy InnerTube (ANDROID_VR & IOS). Backup: ytdl only if InnerTube fails.
-export async function resolveAudio(client, id, clientIp) {
-  const cached_portable = getCached(`portable:${id}`);
-  if (cached_portable) {
-    return { streamUrl: cached_portable.url, source: cached_portable.source };
+// Returns { streamUrl, source } or null — Pure Mochy InnerTube (ANDROID_VR & IOS).
+export async function resolveAudio(id) {
+  const cached = getCached(`innertube:${id}`);
+  if (cached) {
+    return { streamUrl: cached.url, source: cached.source };
   }
-
   try {
-    const p = await getPortable(id);
+    const p = await getInnerTubeAudio(id);
     if (p?.url) return { streamUrl: p.url, source: p.source };
-  } catch (_) {}
-
-  // Emergency fallback only if InnerTube fails
-  const ytdlUrl = getCached(`ytdl:${id}`) || await getYtdlUrl(client, id).catch(() => null);
-  if (ytdlUrl) return { streamUrl: ytdlUrl, source: urlWorksForClient(ytdlUrl, clientIp) ? 'ytdl' : 'ytdl-ip-mismatch' };
+  } catch {}
   return null;
 }
 
-// Step-by-step report so it is obvious which part works on a given host.
-export async function diagnose(client, id, clientIp) {
+// Diagnostic report for Mochy InnerTube clients.
+export async function diagnose(id, clientIp) {
   const timed = async fn => {
     const start = Date.now();
     try {
@@ -337,107 +222,82 @@ export async function diagnose(client, id, clientIp) {
     }
   };
 
-  const report = {
-    videoId: id,
-    runningOn: process.env.VERCEL ? 'vercel' : process.env.NETLIFY ? 'netlify' : 'node',
-    clientIp: normaliseIp(clientIp),
-    ytdl: null,
-    streamUrlCheck: null,
-    fallbacks: []
-  };
-
-  const yt = await timed(() => withTimeout(ytdlExtract(client, id), 8000, 'ytdl'));
-  if (yt.ok) {
-    let host = '';
-    let lockedIp = '';
-    try { const u = new URL(yt.value); host = u.hostname; lockedIp = u.searchParams.get('ip') || ''; } catch {}
-    report.ytdl = { ok: true, ms: yt.ms, host, lockedToIp: lockedIp, worksForThisClient: urlWorksForClient(yt.value, clientIp) };
-    const check = await timed(async () => {
-      const res = await fetch(yt.value, { headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(5000) });
-      return res.status;
-    });
-    report.streamUrlCheck = check.ok
-      ? { fetchedFromServerStatus: check.value, ms: check.ms }
-      : { error: check.error };
-  } else {
-    report.ytdl = { ok: false, ms: yt.ms, error: yt.error };
-  }
-
-  const instances = [
-    ...PIPED_INSTANCES.map(i => ({ kind: 'piped', instance: i, run: () => pipedExtract(i, id) })),
-    ...INVIDIOUS_INSTANCES.map(i => ({ kind: 'invidious', instance: i, run: () => invidiousExtract(i, id) }))
-  ];
-  report.fallbacks = await Promise.all(instances.map(async ({ kind, instance, run }) => {
-    const r = await timed(run);
+  const clients = await Promise.all(MOCHY_INNERTUBE_CLIENTS.map(async c => {
+    const r = await timed(() => mochyInnerTubeExtract(c, id));
     return r.ok
-      ? { kind, instance, ok: true, ms: r.ms }
-      : { kind, instance, ok: false, ms: r.ms, error: r.error };
+      ? { client: c.name, ok: true, ms: r.ms, worksForThisClient: urlWorksForClient(r.value.url, clientIp) }
+      : { client: c.name, ok: false, ms: r.ms, error: r.error };
   }));
 
-  const finalPick = await resolveAudio(client, id, clientIp);
-  report.wouldPlayVia = finalPick ? finalPick.source : 'nothing (iframe fallback, stops when screen locks)';
-  return report;
+  const finalPick = await resolveAudio(id);
+  return {
+    videoId: id,
+    engine: 'Mochy InnerTube Only',
+    clientIp: normaliseIp(clientIp),
+    clients,
+    wouldPlayVia: finalPick ? finalPick.source : 'unavailable'
+  };
 }
 
+// ---- related ("what to play next") via Mochy YT Music InnerTube Radio ----
 
-// ---- related ("what to play next") ----
-
-const idFromWatchUrl = u => (String(u || '').match(/[?&]v=([\w-]{11})/) || [])[1];
-
-async function pipedRelated(instance, id) {
-  const data = await fetchJson(`${instance}/streams/${encodeURIComponent(id)}`, RELATED_TIMEOUT_MS);
-  const items = (data.relatedStreams || [])
-    .filter(s => s && s.type !== 'playlist' && idFromWatchUrl(s.url))
-    .map(s => ({
-      videoId: idFromWatchUrl(s.url), title: s.title, artist: s.uploaderName,
-      duration: s.duration, image: s.thumbnail
-    }));
-  if (!items.length) throw new Error('no related');
-  return items;
+function parseDurationStr(str) {
+  const m = String(str || '').match(/(\d+):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 200;
+  return m[3]
+    ? (parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10))
+    : (parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
 }
 
-async function invidiousRelated(instance, id) {
-  const data = await fetchJson(
-    `${instance}/api/v1/videos/${encodeURIComponent(id)}?local=true&fields=recommendedVideos`,
-    RELATED_TIMEOUT_MS
-  );
-  const items = (data.recommendedVideos || [])
-    .filter(v => v && v.videoId)
-    .map(v => ({
-      videoId: v.videoId, title: v.title, artist: v.author, duration: v.lengthSeconds,
-      image: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`
-    }));
-  if (!items.length) throw new Error('no related');
-  return items;
-}
-
-async function ytdlRelated(client, id) {
-  const info = await withTimeout(
-    client.getInfo(`https://www.youtube.com/watch?v=${id}`), RELATED_TIMEOUT_MS + 1000, 'ytdl related'
-  );
-  const items = (info.related_videos || [])
-    .filter(v => v && v.id)
-    .map(v => ({
-      videoId: v.id, title: v.title, artist: v.author?.name || v.author || '',
-      duration: v.length_seconds, image: v.thumbnails?.[v.thumbnails.length - 1]?.url
-    }));
-  if (!items.length) throw new Error('no related');
-  return items;
-}
-
-// Videos YouTube recommends after this one. First source that answers wins; cached.
-export async function getRelated(client, id) {
+// Supports both getRelated(id) and legacy getRelated(client, id) signature used by taste.mjs.
+export async function getRelated(idOrUnused, maybeId) {
+  const id = maybeId || idOrUnused;
+  if (!id) return [];
   const key = `related:${id}`;
   const cached = getCached(key);
   if (cached) return cached;
+
   return dedupe(key, async () => {
-    const attempts = [
-      ...PIPED_INSTANCES.map(i => pipedRelated(i, id)),
-      ...INVIDIOUS_INSTANCES.map(i => invidiousRelated(i, id)),
-      ytdlRelated(client, id)
-    ];
-    const list = await Promise.any(attempts);
-    setCached(key, list, RELATED_TTL_MS);
-    return list;
+    const res = await fetch('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Origin': 'https://music.youtube.com'
+      },
+      body: JSON.stringify({
+        videoId: id,
+        playlistId: `RDAMVM${id}`,
+        isAudioOnly: true,
+        context: {
+          client: {
+            clientName: 'WEB_REMIX',
+            clientVersion: '1.20241118.01.00',
+            hl: 'en',
+            gl: 'IN'
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(RELATED_TIMEOUT_MS)
+    });
+    if (!res.ok) throw new Error(`InnerTube next HTTP ${res.status}`);
+    const data = await res.json();
+    const tabs = data.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs;
+    const contents = tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer?.content?.playlistPanelRenderer?.contents || [];
+    const items = [];
+    for (const entry of contents) {
+      const v = entry?.playlistPanelVideoRenderer;
+      if (!v?.videoId || v.videoId === id) continue;
+      const title = (v.title?.runs || []).map(r => r.text).join('').trim();
+      const artist = (v.longBylineText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'Unknown Artist').trim();
+      const thumbs = v.thumbnail?.thumbnails || [];
+      const image = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+      const duration = parseDurationStr(v.lengthText?.runs?.[0]?.text);
+      if (title) {
+        items.push({ videoId: v.videoId, title, artist, duration, image });
+      }
+    }
+    if (items.length) setCached(key, items, RELATED_TTL_MS);
+    return items;
   });
 }

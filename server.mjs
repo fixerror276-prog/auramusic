@@ -3,14 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Ytdl, SearchType, Client } from '@distube/ytdl-core';
-const ytAudioClient = new Ytdl({
-  clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded]
-});
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon, syncProfileToNeon, syncPlaylistLikeToNeon, syncSavedPlaylistToNeon, syncUserFollowToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
-import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelated, getDirectAudioUrl, forgetDirectAudioUrl, urlWorksForClient } from './audio_sources.mjs';
+import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelated, urlWorksForClient } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 // Pure Mochy InnerTube Audio Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)
@@ -937,7 +933,7 @@ function sameSong(a, b) {
   return match && (n >= 2 || x[0].length >= 4);
 }
 
-// Live YouTube Music Search — using ytdl-core built-in search (reliable, no API key)
+// Live YouTube Music Search — Pure Mochy InnerTube (WEB_REMIX)
 const searchCache = new Map();
 
 // ── App Update Control helpers ──
@@ -997,7 +993,7 @@ async function trendingIndian() {
   const hour = Math.floor(Date.now() / 3600000);
   const picks = [];
   for (let i = 0; i < 6; i++) picks.push(TRENDING_ARTISTS[(hour * 5 + i * 7) % TRENDING_ARTISTS.length]);
-  const lists = await Promise.all([...new Set(picks)].map(a => searchYouTube(`${a} popular songs`).catch(() => [])));
+  const lists = await Promise.all([...new Set(picks)].map(a => searchYTMusicInnerTube(`${a} popular songs`).catch(() => [])));
   const out = [], seen = new Set();
   for (let round = 0; round < 4; round++) {
     for (const list of lists) {
@@ -1006,31 +1002,15 @@ async function trendingIndian() {
     }
   }
   if (out.length) {
-    warmAudio(ytAudioClient, out.slice(0, 6).map(s => s.videoId));
+    warmAudio(out.slice(0, 6).map(s => s.videoId));
     trendingCache = { at: Date.now(), data: out };
   }
   return out;
 }
 
-// Cached, time-boxed search used by the queue builder, so "next songs" arrive in about a second.
-const queueSearchMemo = new Map();           // query -> { at, data }
-const searchInflight = new Map();
-async function searchYTCached(query, maxMs = 1800) {
-  const hit = queueSearchMemo.get(query);
-  if (hit && Date.now() - hit.at < 3600000) return hit.data;
-  let pending = searchInflight.get(query);
-  if (!pending) {
-    pending = searchYouTube(query)
-      .then(data => { if (data && data.length) queueSearchMemo.set(query, { at: Date.now(), data }); return data || []; })
-      .catch(() => [])
-      .finally(() => searchInflight.delete(query));
-    searchInflight.set(query, pending);
-  }
-  return Promise.race([pending, new Promise(r => setTimeout(() => r([]), maxMs))]);
-}
 // Warm the popular singers right after start so the first queues are instant.
 setTimeout(async () => {
-  for (const a of TRENDING_ARTISTS.slice(0, 16)) { await searchYTCached(`${a} popular songs`, 8000); await new Promise(r => setTimeout(r, 400)); }
+  for (const a of TRENDING_ARTISTS.slice(0, 16)) { await searchYTMusicInnerTube(`${a} popular songs`).catch(() => []); await new Promise(r => setTimeout(r, 300)); }
 }, 4000).unref?.();
 
 async function searchYTMusicInnerTube(query) {
@@ -1038,7 +1018,7 @@ async function searchYTMusicInnerTube(query) {
   const norm = 'ytm_' + query.trim().toLowerCase();
   const cached = searchCache.get(norm);
   if (cached && Date.now() - cached.time < 3600000) {
-    warmAudio(ytAudioClient, cached.data.slice(0, 3).map(s => s.videoId));
+    warmAudio(cached.data.slice(0, 3).map(s => s.videoId));
     return cached.data;
   }
 
@@ -1120,100 +1100,7 @@ async function searchYTMusicInnerTube(query) {
 
   if (songs.length > 0) {
     searchCache.set(norm, { time: Date.now(), data: songs });
-    warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
-  }
-  return songs;
-}
-
-async function searchYouTube(query) {
-  if (!query || !query.trim()) return [];
-  const norm = query.trim().toLowerCase();
-  const cached = searchCache.get(norm);
-  if (cached && Date.now() - cached.time < 3600000) {
-    warmAudio(ytAudioClient, cached.data.slice(0, 3).map(s => s.videoId));
-    return cached.data;
-  }
-
-  const songs = [];
-
-  // Primary: use @distube/ytdl-core built-in search (most reliable)
-  try {
-    const results = await Promise.race([
-      ytAudioClient.search(query.trim(), { type: SearchType.Video, limit: 15 }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('search timeout')), 4000))
-    ]);
-    if (Array.isArray(results) && results.length > 0) {
-      for (const v of results) {
-        if (!v.id) continue;
-        songs.push({
-          id: 'yt_' + v.id,
-          videoId: v.id,
-          name: v.title || query,
-          artist: v.author?.name || 'Unknown Artist',
-          album: 'YouTube Music Single',
-          duration: v.lengthSeconds || 200,
-          image: v.thumbnails?.[v.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
-          url: `/api/yt/stream?id=${v.id}&q=${encodeURIComponent(v.title || query)}`,
-          genre: 'Music',
-          year: new Date().getFullYear().toString(),
-          source: 'AuraMusic Live'
-        });
-      }
-    }
-  } catch (_) {}
-
-  // Fallback: HTML scrape if ytdl search fails
-  if (songs.length === 0) {
-    try {
-      const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query.trim());
-      const r = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9'
-        },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (r.ok) {
-        const html = await r.text();
-        const match = html.match(/var ytInitialData = ({.*?});<\/script>/s) || html.match(/ytInitialData = ({.*?});/s);
-        if (match) {
-          const data = JSON.parse(match[1]);
-          const section = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
-          if (Array.isArray(section)) {
-            for (const s of section) {
-              const items = s.itemSectionRenderer?.contents;
-              if (!Array.isArray(items)) continue;
-              for (const item of items) {
-                if (item.videoRenderer?.videoId) {
-                  const v = item.videoRenderer;
-                  const rawTitle = v.title?.runs?.map(x => x.text).join('') || '';
-                  const artist = v.ownerText?.runs?.map(x => x.text).join('') || '';
-                  songs.push({
-                    id: 'yt_' + v.videoId,
-                    videoId: v.videoId,
-                    name: rawTitle,
-                    artist,
-                    album: 'YouTube Music Single',
-                    duration: 200,
-                    image: v.thumbnail?.thumbnails?.pop()?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-                    url: `/api/yt/stream?id=${v.videoId}&q=${encodeURIComponent(rawTitle)}`,
-                    genre: 'Music',
-                    year: new Date().getFullYear().toString(),
-                    source: 'AuraMusic Live'
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
-  if (songs.length > 0) {
-    searchCache.set(norm, { time: Date.now(), data: songs });
-    // Resolve stream URLs for the top hits in the background so tapping a song starts instantly.
-    warmAudio(ytAudioClient, songs.slice(0, 3).map(s => s.videoId));
+    warmAudio(songs.slice(0, 3).map(s => s.videoId));
   }
   return songs;
 }
@@ -1299,11 +1186,8 @@ async function searchYouTube(query) {
           return sendJson(res, 200, typedResults);
         }
 
-        // Primary: Mochy YouTube Music InnerTube Search (exact YT Music catalog & order)
-        let results = await searchYTMusicInnerTube(query).catch(() => []);
-        if (!results || results.length === 0) {
-          results = await searchYouTube(query);
-        }
+        // Pure Mochy YouTube Music InnerTube Search (exact YT Music catalog & order)
+        const results = await searchYTMusicInnerTube(query).catch(() => []);
         res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
         return sendJson(res, 200, results);
       }
@@ -1311,10 +1195,21 @@ async function searchYouTube(query) {
       if (pathname === '/api/yt/lyrics') {
         const title = parsedUrl.searchParams.get('title') || '';
         const artist = parsedUrl.searchParams.get('artist') || '';
-        const duration = parsedUrl.searchParams.get('duration') || '';
+        const videoId = parsedUrl.searchParams.get('videoId') || '';
+        const duration = Number(parsedUrl.searchParams.get('duration') || 0) || undefined;
         try {
-          const upstream = await fetch(`https://auramusic-2026.netlify.app/api/yt/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${encodeURIComponent(duration)}`);
-          if (upstream.ok) return sendJson(res, 200, await upstream.json());
+          const data = await fetchMultiProviderLyrics({ title, artist, videoId, duration });
+          if (data?.success && Array.isArray(data.lines) && data.lines.length > 0) {
+            const plainLyrics = data.plainLyrics || data.lines.map(l => l.text).join('\n');
+            const syncedLyrics = data.syncedLyrics || (data.synced
+              ? data.lines.map(l => {
+                  const m = String(Math.floor((l.time || 0) / 60)).padStart(2, '0');
+                  const s = ((l.time || 0) % 60).toFixed(2).padStart(5, '0');
+                  return `[${m}:${s}] ${l.text}`;
+                }).join('\n')
+              : '');
+            return sendJson(res, 200, { ...data, syncedLyrics, plainLyrics });
+          }
         } catch {}
         return sendJson(res, 200, { plainLyrics: 'Lyrics unavailable.' });
       }
@@ -1323,7 +1218,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/yt/prefetch') {
         const ids = (parsedUrl.searchParams.get('ids') || '')
           .split(',').map(v => v.replace(/^yt_|^yt-/, '').trim()).filter(Boolean).slice(0, 5);
-        warmAudio(ytAudioClient, ids);
+        warmAudio(ids);
         return sendJson(res, 200, { warming: ids.length });
       }
 
@@ -1384,7 +1279,7 @@ async function searchYouTube(query) {
         };
 
         try {
-          const rel = await Promise.race([getRelated(ytAudioClient, id), new Promise(r => setTimeout(() => r([]), 2500))]);
+          const rel = await Promise.race([getRelated(id), new Promise(r => setTimeout(() => r([]), 2500))]);
           take(fit(rel || []));
         } catch (_) {}
 
@@ -1403,29 +1298,29 @@ async function searchYouTube(query) {
         if (picked.length < 10) {
           if (isPunjabiGangster) {
             const artistPick = PUNJABI_TOP[Math.floor(Math.random() * PUNJABI_TOP.length)];
-            take(keepIndian(asVideos(await searchYTCached(`${artistPick} punjabi top hit songs`))));
+            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} punjabi top hit songs`))));
           } else if (isHaryanvi) {
             const artistPick = HARYANVI_TOP[Math.floor(Math.random() * HARYANVI_TOP.length)];
-            take(keepIndian(asVideos(await searchYTCached(`${artistPick} haryanvi badmashi songs`))));
+            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} haryanvi badmashi songs`))));
           } else if (isHipHop) {
             const artistPick = HIPHOP_TOP[Math.floor(Math.random() * HIPHOP_TOP.length)];
-            take(keepIndian(asVideos(await searchYTCached(`${artistPick} desi hip hop rap`))));
+            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} desi hip hop rap`))));
           } else if (seedMood === 'romantic') {
             const artistPick = ROMANTIC_TOP[Math.floor(Math.random() * ROMANTIC_TOP.length)];
-            take(fit(asVideos(await searchYTCached(`${artistPick} romantic hindi songs`))));
+            take(fit(asVideos(await searchYTMusicInnerTube(`${artistPick} romantic hindi songs`))));
           } else {
             const cleanArt = (artist || title).split(',')[0].trim();
-            take(fit(asVideos(await searchYTCached(`${cleanArt} best songs`))));
+            take(fit(asVideos(await searchYTMusicInnerTube(`${cleanArt} best songs`))));
           }
         }
         if (picked.length < 8 && wantIndian) {
           const pool = seedMood === 'romantic' ? ROMANTIC_TOP : TRENDING_ARTISTS;
           const pick = pool[Math.floor(Math.random() * pool.length)];
-          take(fit(asVideos(await searchYTCached(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
+          take(fit(asVideos(await searchYTMusicInnerTube(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
         }
         // If still not enough and English taste, add English similar songs
         if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
-          take(asVideos(await searchYTCached(`${(artist || title).split(',')[0].trim()} best songs`)));
+          take(asVideos(await searchYTMusicInnerTube(`${(artist || title).split(',')[0].trim()} best songs`)));
         }
 
         // ── Singer flow: 2-4 popular songs of the singer you played, then a similar singer, and so on ──
@@ -1456,7 +1351,7 @@ async function searchYouTube(query) {
           const groups = await Promise.all(singers.map(async n => {
             const own = picked.filter(v => norm(singerOf(v)) === norm(n));
             let found = [];
-            try { found = fit(asVideos(await searchYTCached(`${n} popular songs`))); } catch (_) {}
+            try { found = fit(asVideos(await searchYTMusicInnerTube(`${n} popular songs`))); } catch (_) {}
             found = found.filter(v => norm(singerOf(v)) === norm(n) || norm(String(v.artist || '')).includes(norm(n)));
             return [...own, ...found];
           }));
@@ -1550,10 +1445,10 @@ async function searchYouTube(query) {
           }
         };
 
-        // 1. Direct YouTube Related engine for current song
+        // 1. Direct Mochy InnerTube Related engine for current song
         if (currentSongId) {
           try {
-            const related = await getRelated(ytAudioClient, currentSongId);
+            const related = await getRelated(currentSongId);
             if (Array.isArray(related)) addItems(related);
           } catch (_) {}
         }
@@ -1562,7 +1457,7 @@ async function searchYouTube(query) {
         if (dominantArtists.length > 0 && pool.length < limit) {
           for (const topArt of dominantArtists.slice(0, 2)) {
             try {
-              const artistSongs = await searchYouTube(`${topArt} best songs`);
+              const artistSongs = await searchYTMusicInnerTube(`${topArt} best songs`);
               addItems(artistSongs);
             } catch (_) {}
             if (pool.length >= limit) break;
@@ -1573,13 +1468,13 @@ async function searchYouTube(query) {
         if (pool.length < 5) {
           try {
             const trendingQuery = artist ? `${artist} songs` : 'Trending Hindi Punjabi songs 2026';
-            const trendingSongs = await searchYouTube(trendingQuery);
+            const trendingSongs = await searchYTMusicInnerTube(trendingQuery);
             addItems(trendingSongs);
           } catch (_) {}
         }
 
         const queue = pool.slice(0, limit).map(toSong);
-        warmAudio(ytAudioClient, queue.slice(0, 4).map(s => s.videoId));
+        warmAudio(queue.slice(0, 4).map(s => s.videoId));
 
         return sendJson(res, 200, {
           status: 'success',
@@ -1594,10 +1489,10 @@ async function searchYouTube(query) {
         });
       }
 
-      // Open /api/yt/diag?id=<videoId> in a browser to see which audio source works on this host.
+      // Open /api/yt/diag?id=<videoId> in a browser to see which Mochy InnerTube client works on this host.
       if (pathname === '/api/yt/diag') {
         const id = (parsedUrl.searchParams.get('id') || 'dQw4w9WgXcQ').replace(/^yt_|^yt-/, '').trim();
-        const report = await diagnose(ytAudioClient, id, getClientIp(req));
+        const report = await diagnose(id, getClientIp(req));
         return sendJson(res, 200, report);
       }
 
@@ -1610,8 +1505,7 @@ async function searchYouTube(query) {
         const safeFilename = `${qTitle.replace(/[/\\?%*:|"<>]/g, '')} - ${qArtist.replace(/[/\\?%*:|"<>]/g, '')}.mp3`;
 
         let streamUrl = null;
-        const clientIp = getClientIp(req);
-        const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
+        const resolved = await resolveAudio(cleanId);
         if (resolved?.streamUrl) streamUrl = resolved.streamUrl;
 
         if (streamUrl) {
@@ -1672,24 +1566,21 @@ async function searchYouTube(query) {
         const cleanId = id.replace(/^yt_|^yt-/, '').trim();
         if (!cleanId) return sendJson(res, 400, { error: 'Missing video id' });
 
-        const qTitle = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('q') || '';
-        const qArtist = parsedUrl.searchParams.get('artist') || '';
         const clientIp = getClientIp(req);
 
-        // ── TIER 1: Mochy InnerTube (ANDROID_VR / IOS) + YouTube Audio for exact videoId ──
-        const resolved = await resolveAudio(ytAudioClient, cleanId, clientIp);
+        // ── Pure Mochy InnerTube (ANDROID_VR / IOS) for exact videoId ──
+        const resolved = await resolveAudio(cleanId);
 
         if (resolved?.streamUrl) {
-          const src = resolved.source || '';
-          const isPortable = src.startsWith('piped:') || src.startsWith('invidious:');
+          const src = resolved.source || 'innertube';
 
           // json=1 → return URL for the player to use directly
           if (parsedUrl.searchParams.get('json') === '1') {
             return sendJson(res, 200, { streamUrl: resolved.streamUrl, source: src });
           }
 
-          // Portable CDN URLs: 307 redirect so the browser streams directly (fastest)
-          if (isPortable && !parsedUrl.searchParams.get('proxy')) {
+          // Innertube IP-matched URL: redirect directly so the browser streams at 0.5s speed
+          if (urlWorksForClient(resolved.streamUrl, clientIp)) {
             res.writeHead(307, {
               'Location': resolved.streamUrl,
               'Cache-Control': 'private, max-age=120',
@@ -1698,23 +1589,11 @@ async function searchYouTube(query) {
             return res.end();
           }
 
-          // ytdl / innertube IP-matched URL: also redirect directly when same IP
-          if ((src === 'ytdl' || src.startsWith('innertube:')) && urlWorksForClient(resolved.streamUrl, clientIp)) {
-            if (parsedUrl.searchParams.get('json') !== '1') {
-              res.writeHead(307, {
-                'Location': resolved.streamUrl,
-                'Cache-Control': 'private, max-age=120',
-                'Access-Control-Allow-Origin': '*'
-              });
-              return res.end();
-            }
-          }
-
-          // Otherwise proxy through server (IP-locked ytdl URL)
+          // Otherwise proxy through server if IP-locked
           try {
             const served = await proxyAudio(req, res, {
               getUrl: () => Promise.resolve(resolved.streamUrl),
-              forget: () => forgetDirectAudioUrl(cleanId)
+              forget: () => {}
             });
             if (served) return;
           } catch (err) {
@@ -1723,34 +1602,7 @@ async function searchYouTube(query) {
           }
         }
 
-        // ── LAST RESORT: ytdl direct download pipe ─────────────────────────
-        try {
-          const dlStream = ytAudioClient.download(`https://www.youtube.com/watch?v=${cleanId}`, {
-            filter: { hasAudio: true, hasVideo: false },
-            quality: 'highestaudio'
-          });
-          let headersSent = false;
-          dlStream.on('info', (info, format) => {
-            if (!headersSent) {
-              headersSent = true;
-              const mimeType = format?.mimeType?.split(';')[0] || 'audio/mp4';
-              res.writeHead(200, {
-                'Content-Type': mimeType,
-                'Accept-Ranges': 'bytes',
-                'Access-Control-Allow-Origin': '*',
-                'Cache-Control': 'no-store'
-              });
-            }
-          });
-          dlStream.on('error', () => {
-            if (!headersSent) sendJson(res, 500, { error: 'Audio stream failed' });
-          });
-          res.on('close', () => dlStream.destroy());
-          dlStream.pipe(res);
-          return;
-        } catch (err) {
-          return sendJson(res, 500, { error: 'Stream failed' });
-        }
+        return sendJson(res, 502, { error: 'Mochy InnerTube stream unavailable' });
       }
 
       // ─── Playlists API (Personal & Community Sync) ──────────────────────
@@ -2675,7 +2527,7 @@ async function searchYouTube(query) {
       // GET /api/taste/foryou?userId=X -> personalized recommendations
       if (pathname === '/api/taste/foryou' && req.method === 'GET') {
         const userId = parsedUrl.searchParams.get('userId') || 'guest';
-        const songs = await forYou(memoryDb, userId, ytAudioClient, getRelated, toSong).catch(() => []);
+        const songs = await forYou(memoryDb, userId, null, getRelated, toSong).catch(() => []);
         return sendJson(res, 200, songs);
       }
 
@@ -2901,7 +2753,7 @@ async function searchYouTube(query) {
       if (pathname === '/api/yt/warm' && req.method === 'GET') {
         const videoId = (parsedUrl.searchParams.get('id') || '').replace(/^yt[-_]/, '').trim();
         if (videoId) {
-          warmAudio(ytAudioClient, [videoId]);
+          warmAudio([videoId]);
         }
         return sendJson(res, 200, { success: true });
       }
@@ -3146,9 +2998,9 @@ async function searchYouTube(query) {
             }))
           },
           audioEngine: {
-            primaryTier: 'Mochy InnerTube Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)',
-            fallbackTier: 'Piped & Invidious Audio Extraction + ytdl-core',
-            bufferingOptimizer: 'ACTIVE (Pre-warm next 3 songs + 2s timeout fallback)',
+            primaryTier: 'Pure Mochy InnerTube Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)',
+            fallbackTier: 'NONE (Pure Mochy InnerTube Only)',
+            bufferingOptimizer: 'ACTIVE (Pre-warm next 3 songs)',
             downloadSystem: 'ACTIVE (/api/yt/download direct MP3 streamer)'
           },
           database: {
