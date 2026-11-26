@@ -208,9 +208,11 @@
   let _eqFilters = [];
   let _bassFilter = null;
   let _pannerNode = null;
+  let _compressorNode = null;
   let _analyser = null;
   let _8dInterval = null;
   let _8dAngle = 0;
+  let _crossfadeTriggeredFor = '';
 
   function ensureAudioDsp() {
     const audio = getMainAudio();
@@ -251,6 +253,12 @@
       _bassFilter.frequency.value = 85;
       _bassFilter.gain.value = settings.bassBoost || 0;
 
+      _compressorNode = _audioCtx.createDynamicsCompressor ? _audioCtx.createDynamicsCompressor() : null;
+      if (_compressorNode) {
+        _compressorNode.threshold.value = -12;
+        _compressorNode.ratio.value = 4;
+      }
+
       _pannerNode = _audioCtx.createStereoPanner ? _audioCtx.createStereoPanner() : null;
       _analyser = _audioCtx.createAnalyser();
       _analyser.fftSize = 64;
@@ -259,6 +267,7 @@
       _eqFilters.forEach(f => { prev.connect(f); prev = f; });
       prev.connect(_bassFilter);
       prev = _bassFilter;
+      if (_compressorNode) { prev.connect(_compressorNode); prev = _compressorNode; }
       if (_pannerNode) { prev.connect(_pannerNode); prev = _pannerNode; }
       prev.connect(_analyser);
       _analyser.connect(_audioCtx.destination);
@@ -464,11 +473,39 @@
           action: "window.auraSwitchMochyTab('skins')"
         },
         {
+          id: 'search_pro',
+          title: 'Search Explorer (Albums, Artists, Playlists)',
+          sub: 'Typed YouTube Music search, browse & Wikipedia artist bios',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+          action: "window.auraOpenSearchExplorer && window.auraOpenSearchExplorer()"
+        },
+        {
+          id: 'importer',
+          title: 'Import Playlists (Spotify, Apple, Tidal)',
+          sub: 'Import public playlists or CSV tracklists into AuraMusic',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+          action: "window.auraOpenPlaylistImporter && window.auraOpenPlaylistImporter()"
+        },
+        {
+          id: 'local_music',
+          title: 'Local Music Scanner',
+          sub: 'Scan & play MP3, M4A, FLAC & WAV files from device storage',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+          action: "window.auraOpenLocalScanner && window.auraOpenLocalScanner()"
+        },
+        {
+          id: 'stats',
+          title: 'Listening History & Stats',
+          sub: 'Top artists, play counts & listening time',
+          icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>',
+          action: "window.auraOpenListeningStats && window.auraOpenListeningStats()"
+        },
+        {
           id: 'customisation',
-          title: 'Customisation',
-          sub: 'Edit Profile, Gallery Photo & Share Card Studio',
+          title: 'Customisation (Themes, Fonts & Gestures)',
+          sub: 'Accent colors, AMOLED, custom fonts, modules & Edit Profile',
           icon: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22c4.97 0 9-4.03 9-9 0-4.97-4.03-9-9-9S3 8.03 3 13c0 2.76 2.24 5 5 5h1c1.1 0 2 .9 2 2 0 1.1.9 2 1 2z"/></svg>',
-          action: "window.auraOpenEditProfileFromMochy()"
+          action: "window.auraOpenProCustomize && window.auraOpenProCustomize()"
         },
         {
           id: 'storage',
@@ -1109,23 +1146,35 @@
   // Inspired by Mochy Music Live features (GPL-3.0) — reimplemented in JS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // ── Lyrics Ticker ──────────────────────────────────────────────────────────
+  // ── Lyrics Ticker (Multi-Provider + Word-by-Word Sync) ────────────────────
+  let _lyricsProviderName = '';
   window.auraStartLiveLyrics = async function() {
     const song = getCurrentSong();
     if (!song || (!song.name && !song.title)) return toast('Play a song first', 'error');
     const songName = song.name || song.title || '';
     const artistName = song.artist || '';
+    const videoId = song.videoId || '';
+    const a = getMainAudio();
+    const duration = (a && a.duration && isFinite(a.duration)) ? a.duration : (song.duration || '');
+    const providers = (typeof window.auraGetEnabledLyricsProviders === 'function')
+      ? window.auraGetEnabledLyricsProviders().join(',')
+      : '';
     toast('Fetching synced lyrics…');
     try {
-      const res = await fetch('/api/lyrics/live?title=' + encodeURIComponent(songName) + '&artist=' + encodeURIComponent(artistName));
+      const url = '/api/lyrics/live?title=' + encodeURIComponent(songName) +
+        '&artist=' + encodeURIComponent(artistName) +
+        (videoId ? '&videoId=' + encodeURIComponent(videoId) : '') +
+        (duration ? '&duration=' + encodeURIComponent(duration) : '') +
+        (providers ? '&providers=' + encodeURIComponent(providers) : '');
+      const res = await fetch(url);
       const data = await res.json();
       if (!data.success || !data.lines || !data.lines.length) {
-        return toast('No synced lyrics found for this song', 'error');
+        return toast('No synced lyrics found across providers', 'error');
       }
       _lyricsLines = data.lines;
+      _lyricsProviderName = data.provider || 'Synced';
       renderLyricsTicker(_lyricsLines);
-      toast('Lyrics loaded — ' + _lyricsLines.length + ' lines');
-      // Refresh live tab UI if open
+      toast(`Lyrics: ${_lyricsProviderName} (${_lyricsLines.length} lines)`);
       if (_activeTab === 'live') renderMochyTabContent();
     } catch (err) {
       toast('Lyrics fetch failed', 'error');
@@ -1185,13 +1234,21 @@
       const line2 = document.getElementById('aura-lyrics-line2');
       if (!line1) return;
       if (cur >= 0) {
-        const curText = lines[cur].text || '';
+        const curLine = lines[cur];
         const nextText = lines[cur + 1] ? lines[cur + 1].text : '';
-        if (line1.textContent !== curText) {
-          line1.style.opacity = '0';
-          setTimeout(function() { line1.textContent = curText; line1.style.opacity = '1'; }, 150);
+        if (Array.isArray(curLine.words) && curLine.words.length > 0) {
+          line1.innerHTML = curLine.words.map(w => {
+            const active = w.time <= t;
+            return `<span style="color:${active ? '#34d399' : 'rgba(255,255,255,0.45)'};transition:color 0.12s;">${w.text.replace(/</g, '&lt;')} </span>`;
+          }).join('');
+        } else {
+          const curText = curLine.text || '';
+          if (line1.textContent !== curText) {
+            line1.style.opacity = '0';
+            setTimeout(function() { line1.textContent = curText; line1.style.opacity = '1'; }, 120);
+          }
         }
-        line2.textContent = nextText;
+        line2.textContent = (_lyricsProviderName ? `[${_lyricsProviderName}] ` : '') + nextText;
       } else {
         line1.textContent = '♪ ' + (getCurrentSong() ? (getCurrentSong().name || getCurrentSong().title || '') : '');
         line2.textContent = '';
@@ -1653,6 +1710,26 @@
   setInterval(() => {
     injectMochyNav();
     if (_lyricsInterval) syncOnSongActivity();
+    const cf = Number(settings.crossfadeSec || 0);
+    const a = getMainAudio();
+    if (cf > 0 && a && !a.paused && a.duration && isFinite(a.duration) && a.duration > cf + 2) {
+      const rem = a.duration - a.currentTime;
+      const srcKey = a.src || '';
+      if (rem > 0 && rem <= cf && _crossfadeTriggeredFor !== srcKey) {
+        _crossfadeTriggeredFor = srcKey;
+        const origVol = a.volume || 1;
+        let step = 8;
+        const ramp = setInterval(() => {
+          step--;
+          a.volume = Math.max(0.05, origVol * (step / 8));
+          if (step <= 0) {
+            clearInterval(ramp);
+            document.querySelector('button[title*=Next i], button[aria-label*=Next i]')?.click();
+            setTimeout(() => { a.volume = origVol; }, 600);
+          }
+        }, Math.max(80, Math.floor((cf * 1000) / 10)));
+      }
+    }
   }, 1000);
   window.addEventListener('DOMContentLoaded', () => {
     applyGlobalPreferences();

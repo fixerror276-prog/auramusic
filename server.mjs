@@ -14,6 +14,7 @@ import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelate
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 // Pure Mochy InnerTube Audio Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)
+import { searchYTMusicTyped, browseYTMusic, getArtistInfo, fetchMultiProviderLyrics, resolveExternalImport } from './mochy_providers.mjs';
 import { recordTaste, buildDNA, processDailyDecay, getContext, forYou, generateAutoPlaylists, getMoodRecommendations, getUserDashboardAnalytics, clearUserTasteData, toSong } from './taste.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1289,6 +1290,13 @@ async function searchYouTube(query) {
           });
 
           return sendJson(res, 200, finalMerged);
+        }
+
+        const searchType = (parsedUrl.searchParams.get('type') || 'songs').toLowerCase();
+        if (searchType === 'albums' || searchType === 'artists' || searchType === 'playlists') {
+          const typedResults = await searchYTMusicTyped(query, searchType).catch(() => []);
+          res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
+          return sendJson(res, 200, typedResults);
         }
 
         // Primary: Mochy YouTube Music InnerTube Search (exact YT Music catalog & order)
@@ -2899,34 +2907,40 @@ async function searchYouTube(query) {
       }
 
       
-      // ─── Live Synced Lyrics (Mochy LRCLib Provider) ────────────────────────
+      // ─── Live Multi-Provider Synced Lyrics (YouLy+, SimpMusic, LRCLib, NetEase) ───
       if (pathname === '/api/lyrics/live' && req.method === 'GET') {
-        const title = (parsedUrl.searchParams.get('title') || '').split('|')[0].replace(/\(.*?\)|\[.*?\]/g, '').trim();
-        const artist = (parsedUrl.searchParams.get('artist') || '').split(',')[0].trim();
-        if (!title) return sendJson(res, 200, { success: false, lines: [] });
-        try {
-          const lrcRes = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`, {
-            headers: { 'User-Agent': 'AuraMusic/1.0' },
-            signal: AbortSignal.timeout(3500)
-          });
-          if (lrcRes.ok) {
-            const list = await lrcRes.json();
-            const match = Array.isArray(list) ? list.find(x => x.syncedLyrics) || list[0] : null;
-            if (match && match.syncedLyrics) {
-              const lines = [];
-              for (const raw of match.syncedLyrics.split('\n')) {
-                const m = raw.match(/\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)/);
-                if (m) {
-                  const sec = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
-                  const text = m[3].trim();
-                  if (text) lines.push({ time: sec, text });
-                }
-              }
-              return sendJson(res, 200, { success: true, synced: true, lines });
-            }
-          }
-        } catch {}
-        return sendJson(res, 200, { success: false, synced: false, lines: [] });
+        const title = parsedUrl.searchParams.get('title') || '';
+        const artist = parsedUrl.searchParams.get('artist') || '';
+        const videoId = parsedUrl.searchParams.get('videoId') || '';
+        const duration = Number(parsedUrl.searchParams.get('duration') || 0) || undefined;
+        const providersParam = parsedUrl.searchParams.get('providers');
+        const enabledProviders = providersParam ? providersParam.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+        const result = await fetchMultiProviderLyrics({ title, artist, videoId, duration, enabledProviders });
+        return sendJson(res, 200, result);
+      }
+
+      // ─── Mochy Browse (Album / Playlist / Artist) ──────────────────────────
+      if (pathname === '/api/yt/browse' && req.method === 'GET') {
+        const browseId = parsedUrl.searchParams.get('id') || '';
+        if (!browseId) return sendJson(res, 400, { success: false, error: 'Missing id' });
+        const data = await browseYTMusic(browseId);
+        if (!data) return sendJson(res, 404, { success: false, error: 'Not found' });
+        return sendJson(res, 200, { success: true, ...data });
+      }
+
+      // ─── Artist Info (Wikipedia Bio + InnerTube Top Songs) ─────────────────
+      if (pathname === '/api/artist/info' && req.method === 'GET') {
+        const name = parsedUrl.searchParams.get('name') || '';
+        if (!name) return sendJson(res, 400, { success: false, error: 'Missing artist name' });
+        const info = await getArtistInfo(name);
+        return sendJson(res, 200, { success: !!info, artist: info });
+      }
+
+      // ─── External Playlist Importer (Spotify, Apple Music, Tidal, CSV/Text) ─
+      if (pathname === '/api/import/resolve' && req.method === 'POST') {
+        const b = await parseBody(req);
+        const result = await resolveExternalImport(b.input || b.url || '');
+        return sendJson(res, 200, result);
       }
 
       // ─── Live Listen Together Room System ──────────────────────────────────
