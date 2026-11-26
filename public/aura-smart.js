@@ -161,16 +161,28 @@
         if (!Array.isArray(queue) || queue.length === 0) return;
 
         const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
+        const curSong = queue[idx];
         const nextSong = queue[idx + 1];
         const nextPlusOne = queue[idx + 2];
         const nextPlusTwo = queue[idx + 3];
+        const nextPlusThree = queue[idx + 4];
 
-        // 1. Immediately buffer the NEXT upcoming song (<1s playback target)
+        // 1. Immediately buffer the NEXT upcoming song (0.2s skip playback)
         if (nextSong) preloadUpcomingSong(nextSong, true);
 
-        // 2. Pre-resolve stream URLs for next+1 and next+2 in background
-        if (nextPlusOne) setTimeout(() => preloadUpcomingSong(nextPlusOne, false), 200);
-        if (nextPlusTwo) setTimeout(() => preloadUpcomingSong(nextPlusTwo, false), 450);
+        // 2. Pre-resolve stream URLs for next+1 .. next+3 immediately in parallel
+        if (nextPlusOne) preloadUpcomingSong(nextPlusOne, false);
+        if (nextPlusTwo) preloadUpcomingSong(nextPlusTwo, false);
+        if (nextPlusThree) preloadUpcomingSong(nextPlusThree, false);
+
+        // 3. Proactive queue refill: if <= 3 songs remain ahead, pre-warm related list NOW so there is zero 5s break
+        if (curSong && (queue.length - 1 - idx) <= 3 && window.__auraRelated?.load) {
+          window.__auraRelated.load(curSong, (relList) => {
+            if (Array.isArray(relList) && relList.length && window.__pfWarm) {
+              window.__pfWarm(relList.slice(0, 5).map(s => s.videoId || s.id));
+            }
+          });
+        }
       } catch (_) {}
     }, 15);
   }
@@ -265,6 +277,22 @@
             headers: { 'Content-Type': 'application/json' }
           }));
         }
+      }
+      // Auto-warm top 10 songs whenever search/related/trending results arrive so EVERY tap plays in 0.2-0.5s
+      if (typeof resource === 'string' && (resource.includes('/api/yt/search') || resource.includes('/api/yt/related') || resource.includes('/api/search/songs'))) {
+        return _origFetch.apply(this, arguments).then(res => {
+          try {
+            if (res && res.ok) {
+              res.clone().json().then(data => {
+                const list = Array.isArray(data) ? data : (data?.data?.results || data?.queue || []);
+                if (Array.isArray(list) && list.length && window.__pfWarm) {
+                  window.__pfWarm(list.slice(0, 10).map(s => s.videoId || s.id).filter(Boolean));
+                }
+              }).catch(() => {});
+            }
+          } catch (_) {}
+          return res;
+        });
       }
       return _origFetch.apply(this, arguments);
     };

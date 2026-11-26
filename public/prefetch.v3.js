@@ -78,14 +78,14 @@
     return hit.p.then(function (r) { return r ? r.clone() : fallback(); });
   };
 
-  // Warm next 2 songs immediately when current song starts
+  // Warm next 5 songs immediately when current song starts (0.2s skip)
   document.addEventListener('play', function (e) {
-    if (!e.target || e.target.tagName !== 'AUDIO') return;
+    if (!e.target || e.target.tagName !== 'AUDIO' || e.target.id === 'aura-shadow-preloader') return;
     try {
       var queue = JSON.parse(localStorage.getItem('auramusic_queue') || '[]');
       var idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
       var nextIds = [];
-      for (var i = idx + 1; i <= idx + 2 && i < queue.length; i++) {
+      for (var i = idx + 1; i <= idx + 5 && i < queue.length; i++) {
         var s = queue[i];
         var v = s && (s.videoId || (s.id && s.id.replace(/^yt[-_]/, '')));
         if (v) nextIds.push(v);
@@ -285,11 +285,17 @@
     return false;
   }
 
-  // ── Fetch related songs from server ─────────────────────────────────────
+  // ── Fetch related songs from server (with 0ms memory cache) ─────────────
+  var relatedCache = {};
   function fetchRelated(seed, done, fail) {
+    var vid = videoId(seed);
+    if (vid && relatedCache[vid] && Date.now() - relatedCache[vid].t < 10 * 60 * 1000) {
+      done(relatedCache[vid].list);
+      return;
+    }
     var lang = tasteLang();
     var url = '/api/yt/related'
-      + '?id=' + encodeURIComponent(videoId(seed))
+      + '?id=' + encodeURIComponent(vid)
       + '&title=' + encodeURIComponent(seed.name || '')
       + '&artist=' + encodeURIComponent(seed.artist || '')
       + '&lang=' + encodeURIComponent(lang)
@@ -302,10 +308,12 @@
       .then(function(r) { return r.ok ? r.json() : []; })
       .then(function(list) {
         if (!Array.isArray(list) || !list.length) { fail(); return; }
-        // Client-side Taste Lock enforcement (belt+suspenders after server filter)
         var taste = tasteLang();
         var locked = applyTasteLock(list, taste);
-        if (locked.length) done(locked); else fail();
+        var finalList = locked.length ? locked : list;
+        if (vid) relatedCache[vid] = { t: Date.now(), list: finalList };
+        if (window.__pfWarm) window.__pfWarm(finalList.slice(0, 5).map(videoId));
+        done(finalList);
       })
       .catch(function() { fail(); });
   }
@@ -320,8 +328,11 @@
     var fresh = filtered.filter(function(s) {
       return !have[s.id] && !same(s.name, cur.name) && !wasPlayed(s);
     });
+    if (!fresh.length) {
+      fresh = (add || []).filter(function(s) { return !have[s.id] && !same(s.name, cur.name); });
+    }
     var at = queue.findIndex(function(s) { return s.id === cur.id; });
-    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 2).map(videoId));
+    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 5).map(videoId));
     if (at < 0) return queue.concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
   }
@@ -375,7 +386,7 @@
       fetchRelated(cur, done, function() {});
     },
 
-    // Keep 4+ fresh songs queued after current (was 3)
+    // Keep 6+ fresh songs queued after current so queue never stalls at the bottom
     topUp: function(cur, queue, setQueue, toSong) {
       if (!isYt(cur)) return;
       var cleaned = cleanQueue(cur, queue);
@@ -388,15 +399,16 @@
       for (var i = at + 1; i < queue.length; i++) {
         var s = queue[i];
         if (!wasPlayed(s) && !same(s.name, cur.name)) {
-          // In taste-lock mode, only count songs matching the taste
           if (!taste || songLang(s.name, s.artist) !== 'en') ahead++;
         }
       }
-      if (ahead >= 4) return;
+      if (ahead >= 6) return;
       topping[cur.id] = true;
       fetchRelated(cur, function(list) {
         setQueue(function(q) { return merge(cur, q, list.map(toSong)); });
-      }, function() {});
+      }, function() {
+        topping[cur.id] = false;
+      });
     }
   };
 

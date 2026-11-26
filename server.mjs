@@ -1002,7 +1002,7 @@ async function trendingIndian() {
     }
   }
   if (out.length) {
-    warmAudio(out.slice(0, 6).map(s => s.videoId));
+    warmAudio(out.slice(0, 12).map(s => s.videoId));
     trendingCache = { at: Date.now(), data: out };
   }
   return out;
@@ -1018,7 +1018,7 @@ async function searchYTMusicInnerTube(query) {
   const norm = 'ytm_' + query.trim().toLowerCase();
   const cached = searchCache.get(norm);
   if (cached && Date.now() - cached.time < 3600000) {
-    warmAudio(cached.data.slice(0, 3).map(s => s.videoId));
+    warmAudio(cached.data.slice(0, 10).map(s => s.videoId));
     return cached.data;
   }
 
@@ -1100,7 +1100,7 @@ async function searchYTMusicInnerTube(query) {
 
   if (songs.length > 0) {
     searchCache.set(norm, { time: Date.now(), data: songs });
-    warmAudio(songs.slice(0, 3).map(s => s.videoId));
+    warmAudio(songs.slice(0, 10).map(s => s.videoId));
   }
   return songs;
 }
@@ -1363,8 +1363,10 @@ async function searchYTMusicInnerTube(query) {
         for (const v of limitPerArtist(picked, 2)) pushFlow(v);
 
         const result = byFlow.length >= 4 ? byFlow : limitPerArtist(picked, 2);
+        const outSongs = result.slice(0, 20).map(toSong);
+        warmAudio(outSongs.slice(0, 6).map(s => s.videoId));
         res.setHeader('Cache-Control', 'public, max-age=120');
-        return sendJson(res, 200, result.slice(0, 20).map(toSong));
+        return sendJson(res, 200, outSongs);
       }
 
       // ============================================================================
