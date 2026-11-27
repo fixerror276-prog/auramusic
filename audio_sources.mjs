@@ -42,7 +42,7 @@ function pickBest(items, getBitrate, isMp4) {
   return (mp4[0] || [...items].sort(byBitrate)[0]) || null;
 }
 
-// Mochy-Music InnerTube direct player clients (ANDROID_VR & IOS — <300ms unciphered streams)
+// Mochy-Music InnerTube direct player clients (from Mochy YouTubeClient.kt — <300ms unciphered streams)
 const MOCHY_INNERTUBE_CLIENTS = [
   {
     name: 'ANDROID_VR',
@@ -74,6 +74,51 @@ const MOCHY_INNERTUBE_CLIENTS = [
       }
     },
     ua: 'com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)'
+  },
+  {
+    name: 'VISIONOS',
+    context: {
+      client: {
+        clientName: 'VISIONOS',
+        clientVersion: '1.04',
+        osName: 'visionOS',
+        osVersion: '26.6.0.23O770',
+        deviceMake: 'Apple',
+        deviceModel: 'RealityDevice17,1',
+        clientScreen: 'WATCH',
+        platform: 'MOBILE',
+        hl: 'en',
+        gl: 'US'
+      }
+    },
+    ua: 'com.google.visionos.youtube/1.04(RealityDevice17,1; U; CPU visionOS 26_6_0 like Mac OS X; US)'
+  },
+  {
+    name: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+    context: {
+      client: {
+        clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+        clientVersion: '2.0',
+        hl: 'en',
+        gl: 'US'
+      },
+      thirdParty: { embedUrl: 'https://www.youtube.com/' }
+    },
+    ua: 'Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15'
+  },
+  {
+    name: 'ANDROID',
+    context: {
+      client: {
+        clientName: 'ANDROID',
+        clientVersion: '21.26.364',
+        osName: 'Android',
+        osVersion: '11',
+        hl: 'en',
+        gl: 'US'
+      }
+    },
+    ua: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip'
   }
 ];
 
@@ -102,7 +147,11 @@ async function mochyInnerTubeExtract(clientCfg, id) {
     f => f.bitrate || f.averageBitrate || 0,
     f => /audio\/mp4/i.test(f.mimeType || '')
   );
-  if (!best) throw new Error('no innertube audio format');
+  if (!best) {
+    const status = data.playabilityStatus?.status || 'UNKNOWN';
+    const reason = data.playabilityStatus?.reason || '';
+    throw new Error(`no innertube audio format (${status}${reason ? ': ' + reason : ''})`);
+  }
   return { url: best.url, source: `innertube:${clientCfg.name}` };
 }
 
