@@ -198,11 +198,49 @@
       .then(function (l) { return Array.isArray(l) ? l : []; })
       .catch(function () { return []; });
   }
-  function relatedOf(seed) {
-    return fetchList('/api/yt/related?id=' + encodeURIComponent(videoId(seed)) +
-      '&title=' + encodeURIComponent(seed.name || '') +
-      '&artist=' + encodeURIComponent(seed.artist || ''));
+
+  // ── NEW: YouTube Music InnerTube Queue ──────────────────────────────────
+  // Calls /api/yt/queue which uses YTM's real "Up Next" radio (same as Mochy).
+  // Returns 10-20 songs instantly. Falls back to old /api/yt/related if fails.
+  var queueCache = {};   // videoId → { songs, t }
+  var QUEUE_TTL = 20 * 60 * 1000;
+
+  function queueOf(seed) {
+    var vid = videoId(seed);
+    var hit = queueCache[vid];
+    if (hit && Date.now() - hit.t < QUEUE_TTL) return Promise.resolve(hit.songs);
+
+    return fetch('/api/yt/queue?id=' + encodeURIComponent(vid))
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(result) {
+        var songs = Array.isArray(result.songs) ? result.songs : [];
+        if (songs.length > 0) {
+          queueCache[vid] = { songs: songs, t: Date.now() };
+          // Pre-warm audio for first 3 immediately
+          if (window.__pfWarm) {
+            window.__pfWarm(songs.slice(0, 3).map(function(s) { return s.videoId || s.id; }), true);
+          }
+        }
+        return songs;
+      })
+      .catch(function() {
+        // Fallback to old related endpoint
+        return fetchList('/api/yt/related?id=' + encodeURIComponent(vid) +
+          '&title=' + encodeURIComponent(seed.name || '') +
+          '&artist=' + encodeURIComponent(seed.artist || ''));
+      });
   }
+
+  // Pre-load queue for a song before user even presses play
+  // Call this on hover/touch-start for instant queue on play
+  window.__auraPreloadQueue = function(song) {
+    if (!song || !isYt(song)) return;
+    var vid = videoId(song);
+    if (!queueCache[vid]) {
+      queueOf(song).catch(function(){});
+    }
+  };
+
   var forYouCache = { t: 0, list: [] };
   function forYouList() {
     var uid = userId();
@@ -213,17 +251,20 @@
       return list;
     });
   }
-  // songs related to `seed`, mixed one-for-one with songs picked for this user's taste
+
+  // songs from YTM queue mixed with user's taste picks
   function fetchMixed(seed, done, fail) {
-    Promise.all([relatedOf(seed), forYouList()]).then(function (res) {
-      var related = res[0], mine = res[1], out = [], seen = {};
-      for (var i = 0; i < Math.max(related.length, mine.length); i++) {
-        [related[i], mine[i]].forEach(function (s) {
-          if (s && !seen[s.id]) { seen[s.id] = true; out.push(s); }
-        });
-      }
+    Promise.all([queueOf(seed), forYouList()]).then(function (res) {
+      var queue = res[0], mine = res[1], out = [], seen = {};
+      // Queue songs first (they are most relevant), then taste picks
+      queue.forEach(function(s) {
+        if (s && s.id && !seen[s.id]) { seen[s.id] = true; out.push(s); }
+      });
+      mine.forEach(function(s) {
+        if (s && s.id && !seen[s.id]) { seen[s.id] = true; out.push(s); }
+      });
       if (out.length) done(out); else fail();
-    });
+    }).catch(fail);
   }
 
   // put fresh songs right after the current one
