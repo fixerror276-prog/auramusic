@@ -1,9 +1,36 @@
-// AuraMusic Prefetch Engine v4 — Instant playback (<1.5s target)
+// AuraMusic Prefetch Engine v4 — Instant playback (<0.5s target)
 // - Warms stream URLs before tap via /api/yt/stream?json=1
+// - Intercepts HTMLMediaElement.prototype.src synchronously before React mounts
 // - Pre-fetches first 1MB chunk of audio for instant buffer start
-// - 2-connection parallel fetch: stream URL + first audio chunk simultaneously
-// - Fallback: if warm fetch >2s, switch to backup JioSaavn CDN URL
 (function () {
+  window.__auraStreamCache = window.__auraStreamCache || new Map();
+
+  // Instant zero-delay interception of audio.src before anything else runs
+  try {
+    var _mediaSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (_mediaSrcDesc && _mediaSrcDesc.set) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        get: function() {
+          return _mediaSrcDesc.get.call(this);
+        },
+        set: function(val) {
+          var targetUrl = val;
+          if (this.id !== 'aura-shadow-preloader' && typeof val === 'string' && val.includes('/api/yt/stream')) {
+            var match = val.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+            var vid = match ? match[1].replace(/^yt[-_]/, '') : '';
+            var cached = (vid && window.__auraStreamCache.get(vid)) || window.__auraStreamCache.get(val);
+            if (cached) {
+              targetUrl = cached;
+            }
+          }
+          return _mediaSrcDesc.set.call(this, targetUrl);
+        },
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (_) {}
+
   var store = {};           // id -> { t, p, chunkP, url }
   var TTL = 20 * 60 * 1000;
   var CHUNK_BYTES = 1048576; // 1MB first-chunk preload
