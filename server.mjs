@@ -349,7 +349,7 @@ function sendJson(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = parsedUrl.pathname;
 
@@ -2980,7 +2980,9 @@ async function searchYTMusicInnerTube(query) {
 
   res.writeHead(404);
   res.end('Not Found');
-});
+}
+
+export default handleRequest;
 
 // ─── Automated Nightly Decay Scheduler (~2:00 AM IST / 20:30 UTC) ───
 function scheduleNightlyDecay() {
@@ -3020,7 +3022,10 @@ function scheduleNightlyDecay() {
   }, delay);
 }
 
-server.listen(PORT, () => {
-  console.log(`AuraMusic server running at http://localhost:${PORT}`);
-  scheduleNightlyDecay();
-});
+if (!process.env.VERCEL && !process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log(`AuraMusic server running at http://localhost:${PORT}`);
+    scheduleNightlyDecay();
+  });
+}
