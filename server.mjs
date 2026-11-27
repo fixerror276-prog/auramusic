@@ -1099,10 +1099,21 @@ async function searchYTMusicInnerTube(query) {
   }
 
   if (songs.length > 0) {
+    // Resolve top 1 audio synchronously with 800ms race so first tap plays in <0.3s!
+    try {
+      const topAudio = await Promise.race([
+        resolveAudio(songs[0].videoId),
+        new Promise(r => setTimeout(() => r(null), 850))
+      ]);
+      if (topAudio && topAudio.streamUrl) {
+        songs[0].streamUrl = topAudio.streamUrl;
+      }
+    } catch (_) {}
+
     searchCache.set(norm, { time: Date.now(), data: songs });
-    // Immediately warm top 3 synchronously in background without waiting
-    Promise.all(songs.slice(0, 3).map(s => resolveAudio(s.videoId).catch(() => {})));
-    warmAudio(songs.slice(3, 12).map(s => s.videoId));
+    // Immediately warm next songs in background without waiting
+    Promise.all(songs.slice(1, 4).map(s => resolveAudio(s.videoId).catch(() => {})));
+    warmAudio(songs.slice(4, 15).map(s => s.videoId));
   }
   return songs;
 }

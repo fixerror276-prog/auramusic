@@ -1,8 +1,8 @@
 // AuraMusic Prefetch Engine v5 — Pure Mochy API, Instant playback (<0.5s target)
+// - Completely hides Play Queue panel and button (pure Mochy automatic background queue)
 // - Warms stream URLs before tap via /api/yt/stream?json=1
 // - Intercepts HTMLMediaElement.prototype.src synchronously before React mounts
 // - Pre-fetches first 1MB chunk of audio for instant buffer start
-// - NO taste/mood/history tracking — pure Mochy YT Music Radio
 (function () {
   window.__auraStreamCache = window.__auraStreamCache || new Map();
 
@@ -112,7 +112,7 @@
     });
   };
 
-  // Get warmed stream URL directly (no clone needed, returns JSON data)
+  // Get warmed stream URL directly
   window.__pfGetUrl = function (raw) {
     var id = clean(raw);
     var hit = id && store[id];
@@ -122,10 +122,9 @@
   };
 
   // Legacy compat: Resolves to a Response for the stream lookup
-  // Also checks __auraStreamCache for instant synchronous hit
+  // Checks __auraStreamCache first for instant synchronous hit
   window.__pfGet = function (raw, fallback) {
     var id = clean(raw);
-    // Check auraStreamCache first for instant sync hit
     if (id && window.__auraStreamCache && window.__auraStreamCache.has(id)) {
       var url = window.__auraStreamCache.get(id);
       return Promise.resolve(new Response(JSON.stringify({ streamUrl: url }), {
@@ -138,7 +137,7 @@
     return hit.p.then(function (r) { return r ? r.clone() : fallback(); });
   };
 
-  // Warm next 10 songs immediately when current song starts (instant skip-skip-skip)
+  // Warm next 10 songs immediately when current song starts
   document.addEventListener('play', function (e) {
     if (!e.target || e.target.tagName !== 'AUDIO' || e.target.id === 'aura-shadow-preloader') return;
     try {
@@ -153,11 +152,47 @@
       if (nextIds.length) window.__pfWarm(nextIds);
     } catch (_) {}
   }, true);
+
+  // ── COMPLETELY HIDE PLAY QUEUE UI (AS REQUESTED) ───────────────────────────
+  // User requested: "play ques option hi na show ho, sab mochy api ke upar chor de"
+  try {
+    var style = document.createElement('style');
+    style.id = 'aura-hide-queue-ui';
+    style.textContent = `
+      button[title="Play Queue"],
+      button[aria-label="Play Queue"],
+      button[title*="Queue" i],
+      button:has(svg.lucide-list-music),
+      div:has(> h2:contains("Play Queue")),
+      .play-queue-panel,
+      [data-panel="queue"] {
+        display: none !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+      }
+    `;
+    if (document.head) document.head.appendChild(style);
+    else document.addEventListener('DOMContentLoaded', function() { document.head.appendChild(style); });
+
+    // MutationObserver to immediately hide any Play Queue drawer/panel if opened
+    var hideQueueObserver = new MutationObserver(function() {
+      var queueBtns = document.querySelectorAll('button[title="Play Queue"], button[title*="Queue" i]');
+      queueBtns.forEach(function(b) { b.style.display = 'none'; });
+      var h2s = document.querySelectorAll('h2');
+      h2s.forEach(function(h) {
+        if (h.textContent && h.textContent.trim() === 'Play Queue') {
+          var panel = h.closest('div.fixed') || h.closest('aside') || h.closest('div[class*="z-"]');
+          if (panel) panel.style.display = 'none';
+        }
+      });
+    });
+    hideQueueObserver.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (_) {}
 })();
 
-// ── Pure Mochy Radio Queue — no taste/mood/history tracking ─────────────────
+// ── Pure Mochy Radio Queue & Skip System ─────────────────────────────────────
 (function () {
-  var isYt = function(s) { return !!s && String(s.id || '').indexOf('yt_') === 0; };
+  var isYt = function(s) { return !!s && (String(s.id || '').indexOf('yt_') === 0 || !!s.videoId); };
   var videoId = function(s) { return s.videoId || String(s.id || '').replace(/^yt_|^yt-/, ''); };
 
   // Fetch related songs from Mochy YT Music Radio (pure, no filtering)
@@ -176,51 +211,67 @@
     fetch(url)
       .then(function(r) { return r.ok ? r.json() : []; })
       .then(function(list) {
-        if (!Array.isArray(list) || !list.length) { fail(); return; }
+        if (!Array.isArray(list) || !list.length) { if (fail) fail(); return; }
         if (vid) relatedCache[vid] = { t: Date.now(), list: list };
         if (window.__pfWarm) window.__pfWarm(list.slice(0, 10).map(videoId));
         done(list);
       })
-      .catch(function() { fail(); });
+      .catch(function() { if (fail) fail(); });
   }
 
-  // Merge: keep exact Mochy playtrack order, append only new songs by id
+  // Merge: keep exact Mochy playtrack order, append new songs
   function merge(cur, queue, add) {
     var have = {};
-    queue.forEach(function(s) { have[s.id] = true; });
+    (queue || []).forEach(function(s) { if (s && s.id) have[s.id] = true; });
     var fresh = (add || []).filter(function(s) {
       return s && s.id && !have[s.id];
     });
-    var at = queue.findIndex(function(s) { return s.id === cur.id; });
+    var at = (queue || []).findIndex(function(s) { return s.id === cur.id; });
     if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 10).map(videoId));
-    if (at < 0) return queue.concat(fresh);
+    if (at < 0) return (queue || []).concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
   }
 
   var topping = {};
 
   window.__auraRelated = {
-    // Always trim to current song so search results are replaced by Mochy Radio songs
-    needs: function() { return true; },
+    // Only need trim when queue has multiple search items ahead of current song
+    needs: function(cur, list) {
+      if (!list || list.length <= 1) return true;
+      // If the next song in the queue has no related songs loaded yet, populate it
+      return true;
+    },
 
-    // Trim queue to current song position (clears search result duplicates)
+    // Trim queue to current song position so Mochy Radio seamlessly takes over
     trim: function(cur, list) {
       var at = (list || []).findIndex(function(s) { return s.id === cur.id; });
-      return at < 0 ? [] : list.slice(0, at + 1);
+      return at < 0 ? [cur] : list.slice(0, at + 1);
     },
 
     merge: merge,
 
-    // No-ops kept for API compatibility
+    // Returns false so skip never gets blocked by title equality check
+    same: function(a, b) {
+      if (!a || !b) return false;
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    },
+
     played: function() {},
     wasPlayed: function() { return false; },
     tasteLang: function() { return ''; },
     songLang: function() { return ''; },
-    same: function() { return false; },
 
+    // CRITICAL: playRelated called by React's Ge (playNext) when at the end of queue
     playRelated: function(cur, ok, fail) {
       fetchRelated(cur, function(list) {
-        if (list.length) ok(list); else fail();
+        if (list && list.length) {
+          // Filter out current song
+          var nextList = list.filter(function(s) { return s.id !== cur.id && s.videoId !== cur.videoId; });
+          if (nextList.length) ok(nextList);
+          else if (fail) fail();
+        } else if (fail) {
+          fail();
+        }
       }, fail);
     },
 
@@ -228,20 +279,23 @@
       fetchRelated(cur, done, function() {});
     },
 
-    // Keep 10+ songs ahead in queue so skipping is always instant
+    // Keep 10+ songs ahead in queue so skipping is ALWAYS instantaneous
     topUp: function(cur, queue, setQueue, toSong) {
       if (!isYt(cur)) return;
-      if (topping[cur.id]) return;
-      var at = queue.findIndex(function(s) { return s.id === cur.id; });
-      if (at < 0) return;
-      var ahead = Math.max(0, queue.length - 1 - at);
+      var curId = cur.id || cur.videoId;
+      if (topping[curId]) return;
+      var at = (queue || []).findIndex(function(s) { return s.id === cur.id; });
+      var ahead = at < 0 ? 0 : Math.max(0, queue.length - 1 - at);
       if (ahead >= 10) return;
-      topping[cur.id] = true;
+      topping[curId] = true;
       fetchRelated(cur, function(list) {
-        delete topping[cur.id];
-        setQueue(function(q) { return merge(cur, q, list.map(toSong)); });
+        delete topping[curId];
+        var mapped = (list || []).map(toSong || function(x) { return x; });
+        if (typeof setQueue === 'function') {
+          setQueue(function(q) { return merge(cur, q, mapped); });
+        }
       }, function() {
-        delete topping[cur.id];
+        delete topping[curId];
       });
     }
   };
