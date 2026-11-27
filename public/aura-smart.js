@@ -185,7 +185,18 @@
     }, 15);
   }
 
-  // Intercept Storage.prototype.setItem so queue preload triggers the INSTANT queue is written
+  // Intercept navigator.mediaSession.setActionHandler to capture direct playNext callback
+  try {
+    if (typeof navigator !== 'undefined' && navigator.mediaSession && navigator.mediaSession.setActionHandler) {
+      const origSetActionHandler = navigator.mediaSession.setActionHandler;
+      navigator.mediaSession.setActionHandler = function(action, handler) {
+        if (action === 'nexttrack') {
+          navigator.mediaSession._nexttrackHandler = handler;
+        }
+        return origSetActionHandler.apply(this, arguments);
+      };
+    }
+  } catch (_) {}
   try {
     const _origSetItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function(k, v) {
@@ -219,8 +230,34 @@
       const rem = a.duration - a.currentTime;
       if (rem > 0 && rem <= 5.5 && !a._auraAutoAdvanced) {
         a._auraAutoAdvanced = true;
-        const nextBtn = document.querySelector('button[title*="Next" i], button[aria-label*="Next" i]');
-        if (nextBtn) nextBtn.click();
+        // 1. Try MediaSession next action (direct React playNext hook)
+        let handled = false;
+        try {
+          if (typeof navigator !== 'undefined' && navigator.mediaSession) {
+            // Trigger nexttrack if handler exists
+            const nexttrackHandler = navigator.mediaSession._nexttrackHandler;
+            if (typeof nexttrackHandler === 'function') {
+              nexttrackHandler();
+              handled = true;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Try global or React next buttons
+        if (!handled) {
+          const nextBtn = document.querySelector('button[title*="Next" i], button[aria-label*="Next" i], button svg.lucide-skip-forward')?.closest('button');
+          if (nextBtn) {
+            nextBtn.click();
+            handled = true;
+          }
+        }
+
+        // 3. Fallback: trigger React audio ended event naturally if button query misses
+        if (!handled) {
+          try {
+            a.dispatchEvent(new Event('ended'));
+          } catch (_) {}
+        }
       }
     }
   }, true);
