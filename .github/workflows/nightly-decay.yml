@@ -1,0 +1,30 @@
+name: Nightly Taste Decay
+
+on:
+  schedule:
+    # 20:30 UTC = 2:00 AM IST
+    - cron: '30 20 * * *'
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+jobs:
+  decay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger nightly decay
+        run: |
+          echo "Running nightly taste decay at $(date -u)"
+          HTTP_STATUS=$(curl -s -o /tmp/decay_response.txt -w "%{http_code}" \
+            -X POST "${{ secrets.APP_URL }}/api/taste/admin/decay" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/decay_response.txt
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Decay completed successfully"
+          else
+            echo "❌ Decay failed with status $HTTP_STATUS"
+            exit 1
+          fi
