@@ -2353,22 +2353,45 @@
       const headerBtn = document.getElementById('aura-header-download-apk');
       if (!headerBtn) return;
 
-      if (headerBtn.dataset.auraMode !== 'offline') {
-        headerBtn.dataset.auraMode = 'offline';
-        headerBtn.removeAttribute('href');
-        headerBtn.removeAttribute('download');
-        headerBtn.removeAttribute('target');
-        headerBtn.title = 'View Offline Downloaded Songs';
-        headerBtn.className = 'flex items-center space-x-1.5 py-1.5 px-3 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-black transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm shadow-emerald-500/10 shrink-0';
-        headerBtn.innerHTML = `
-          <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
-          <span>Downloaded</span>
-        `;
-        headerBtn.onclick = function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          showDownloadedSongsModal();
-        };
+      const apkLink = 'https://github.com/fixerror276-prog/auramusic/releases/download/apk-latest/AuraMusic.apk';
+
+      if (isApp) {
+        // Inside Android App: show Offline Downloaded Songs library
+        if (headerBtn.dataset.auraMode !== 'offline') {
+          headerBtn.dataset.auraMode = 'offline';
+          headerBtn.removeAttribute('href');
+          headerBtn.removeAttribute('download');
+          headerBtn.removeAttribute('target');
+          headerBtn.title = 'View Offline Downloaded Songs';
+          headerBtn.className = 'flex items-center space-x-1.5 py-1.5 px-3 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-black transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm shadow-emerald-500/10 shrink-0';
+          headerBtn.innerHTML = `
+            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+            <span>Downloaded</span>
+          `;
+          headerBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            showDownloadedSongsModal();
+          };
+        }
+      } else {
+        // On Web browser: direct APK download / Install App button
+        if (headerBtn.dataset.auraMode !== 'download') {
+          headerBtn.dataset.auraMode = 'download';
+          headerBtn.setAttribute('href', apkLink);
+          headerBtn.setAttribute('download', 'AuraMusic.apk');
+          headerBtn.setAttribute('target', '_blank');
+          headerBtn.title = 'Download & Install AuraMusic Android App (APK)';
+          headerBtn.className = 'flex items-center space-x-1.5 py-1.5 px-3 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 text-xs font-black transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm shadow-emerald-500/10 shrink-0';
+          headerBtn.innerHTML = `
+            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+            <span>Install App</span>
+          `;
+          headerBtn.onclick = function(e) {
+            // allows direct download + shows feature modal
+            showAppFeatureModal();
+          };
+        }
       }
     }
 
