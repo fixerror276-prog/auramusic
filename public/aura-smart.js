@@ -125,32 +125,9 @@
       if (artist) warmParams.set('artist', artist);
       fetch(`/api/yt/warm?${warmParams.toString()}`).catch(() => {});
     }
-
-    // Shadow audio buffering: muted play -> immediate pause forces mobile browsers to buffer actual audio frames!
-    if (streamUrl && isNextImmediate) {
-      if (_activePreloadId !== itemKey) {
-        _activePreloadId = itemKey;
-        const preloader = getShadowPreloader();
-        if (preloader) {
-          try {
-            preloader.muted = true;
-            preloader.volume = 0;
-            preloader.src = streamUrl;
-            preloader.load();
-            const onReadyToBuffer = () => {
-              preloader.pause();
-              try { preloader.currentTime = 0; } catch (_) {}
-            };
-            preloader.addEventListener('playing', onReadyToBuffer, { once: true });
-            const p = preloader.play();
-            if (p && p.catch) p.catch(() => {});
-          } catch (_) {}
-        }
-      }
-    }
   }
 
-  // Master function triggered IMMEDIATELY whenever a queue is formed or changed
+  // Master function triggered whenever a queue is formed or changed
   function triggerImmediateQueuePreload() {
     clearTimeout(_queuePreloadTimer);
     _queuePreloadTimer = setTimeout(() => {
@@ -164,16 +141,13 @@
         const curSong = queue[idx];
         const nextSong = queue[idx + 1];
 
-        // 1. Immediately buffer the NEXT upcoming song (0.2s skip playback)
         if (nextSong) preloadUpcomingSong(nextSong, true);
 
-        // 2. Pre-resolve stream URLs for the next 10 songs in parallel (instant skip-skip-skip!)
         for (let offset = 2; offset <= 10; offset++) {
           const upcoming = queue[idx + offset];
           if (upcoming) preloadUpcomingSong(upcoming, false);
         }
 
-        // 3. Proactive queue refill: if <= 5 songs remain ahead, pre-warm related list NOW
         if (curSong && (queue.length - 1 - idx) <= 5 && window.__auraRelated?.load) {
           window.__auraRelated.load(curSong, (relList) => {
             if (Array.isArray(relList) && relList.length && window.__pfWarm) {
@@ -272,43 +246,7 @@
     }
   }, true);
 
-  // Intercept HTMLMediaElement.prototype.src to instantly swap direct pre-buffered CDN URL!
-  try {
-    const _mediaSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-    if (_mediaSrcDesc && _mediaSrcDesc.set) {
-      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
-        get: function() {
-          return _mediaSrcDesc.get.call(this);
-        },
-        set: function(val) {
-          let targetUrl = val;
-          if (this.id !== 'aura-shadow-preloader' && typeof val === 'string' && val.includes('/api/yt/stream')) {
-            const match = val.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-            const vid = match ? match[1].replace(/^yt[-_]/, '') : '';
-            const titleMatch = val.match(/[?&]title=([^&]+)/) || val.match(/[?&]q=([^&]+)/);
-            const artistMatch = val.match(/[?&]artist=([^&]+)/);
-            const title = titleMatch ? decodeURIComponent(titleMatch[1]) : '';
-            const artist = artistMatch ? decodeURIComponent(artistMatch[1]) : '';
-            const key = normSongKey(title, artist);
-            const titleOnlyKey = title ? title.split('|')[0].replace(/\(.*?\)|\[.*?\]/g, '').trim().toLowerCase() : '';
-
-            const cached = (vid && window.__auraStreamCache.get(vid)) ||
-                           (key && window.__auraStreamCache.get(key)) ||
-                           (titleOnlyKey && window.__auraStreamCache.get(titleOnlyKey)) ||
-                           window.__auraStreamCache.get(val);
-
-            if (cached) {
-              targetUrl = cached;
-              console.log('[AuraInstant] ⚡ 0.5s Instant Playback Hit for:', vid || title);
-            }
-          }
-          return _mediaSrcDesc.set.call(this, targetUrl);
-        },
-        configurable: true,
-        enumerable: true
-      });
-    }
-  } catch (_) {}
+  // /* src interceptor disabled to let server proxy audio seamlessly */
 
   // Hook window.fetch for /api/yt/stream json=1 to instantly return cached stream URL
   try {

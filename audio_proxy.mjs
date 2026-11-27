@@ -10,17 +10,20 @@ import { Readable } from 'node:stream';
 const CHUNK_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 10000;
 const USER_AGENT =
-  'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
+  'com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)';
 
 function parseRange(header) {
   const m = /^bytes=(\d+)-(\d*)$/.exec(header || '');
-  if (!m) return null;
+  if (!m) {
+    // If client sends no Range header (first audio tag request), request initial 1MB chunk from YouTube
+    return { start: 0, end: CHUNK_BYTES - 1, isDefault: true };
+  }
   const start = parseInt(m[1], 10);
   let end = m[2] === '' ? null : parseInt(m[2], 10);
   const cap = start + CHUNK_BYTES - 1;
   if (end === null || end > cap) end = cap;
   if (end < start) return null;
-  return { start, end };
+  return { start, end, isDefault: false };
 }
 
 // getUrl(): Promise<string>  - the (cached) upstream audio URL
@@ -77,10 +80,12 @@ export async function proxyAudio(req, res, { getUrl, forget }) {
     const length = upstream.headers.get('content-length');
     if (length) out['Content-Length'] = length;
     const contentRange = upstream.headers.get('content-range');
-    if (upstream.status === 206 && contentRange) out['Content-Range'] = contentRange;
-
-    // If the browser asked for a range but upstream ignored it (200), we send the whole thing as 200.
-    res.writeHead(upstream.status === 206 && contentRange ? 206 : 200, out);
+    if (contentRange) {
+      out['Content-Range'] = contentRange;
+      res.writeHead(206, out);
+    } else {
+      res.writeHead(200, out);
+    }
 
     const body = Readable.fromWeb(upstream.body);
     res.on('close', () => body.destroy());
