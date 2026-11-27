@@ -34,13 +34,39 @@
     } catch (e) { return Promise.resolve(null); }
   }
 
-  // Warm: resolve URL + pre-fetch first chunk in parallel
+  // Hidden <audio> pre-buffer pool so top search results & next songs start in ~0.1s
+  var _audioPool = [];
+  function prebufferAudioElement(url) {
+    if (!url || typeof document === 'undefined' || !document.body) return;
+    try {
+      var el = _audioPool.shift();
+      if (!el) {
+        el = document.createElement('audio');
+        el.preload = 'auto';
+        el.muted = true;
+        el.volume = 0;
+        el.id = 'aura-shadow-preloader';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+      }
+      _audioPool.push(el);
+      if (el.src !== url) {
+        el.src = url;
+        el.load();
+      }
+    } catch (_) {}
+  }
+
+  // Warm: resolve URL + pre-fetch first chunk + prebuffer <audio> in parallel
   window.__pfWarm = function (ids) {
-    (ids || []).forEach(function (raw) {
+    (ids || []).forEach(function (raw, idx) {
       var id = clean(raw);
       if (!id) return;
       var hit = store[id];
-      if (hit && Date.now() - hit.t < TTL) return;
+      if (hit && Date.now() - hit.t < TTL) {
+        if (hit.url && idx < 2) prebufferAudioElement(hit.url);
+        return;
+      }
 
       var urlPromise = resolveStreamUrl(id);
       store[id] = {
@@ -50,9 +76,8 @@
           if (data && data.streamUrl) {
             store[id].url = data.streamUrl;
             if (window.__auraStreamCache) window.__auraStreamCache.set(id, data.streamUrl);
-            // Fire first-chunk prefetch immediately after URL resolved (parallel)
             store[id].chunkP = prefetchFirstChunk(data.streamUrl);
-            // Return a fake Response so __pfGet is happy
+            if (idx < 2) prebufferAudioElement(data.streamUrl);
             return new Response(JSON.stringify(data), { status: 200 });
           }
           return null;
@@ -338,8 +363,17 @@
       }, fail);
     },
 
-    needs: function() { return false; },
-    trim: function(cur, list) { return list; },
+    needs: function(cur, list) {
+      if (fromSearch()) return true;
+      for (var i = 0; i < (list || []).length; i++) {
+        if (list[i].id !== cur.id && same(list[i].name, cur.name)) return true;
+      }
+      return false;
+    },
+    trim: function(cur, list) {
+      var at = (list || []).findIndex(function(s) { return s.id === cur.id; });
+      return at < 0 ? list : list.slice(0, at + 1);
+    },
     load: function(cur, done) {
       fetchRelated(cur, done, function() {});
     },

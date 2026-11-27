@@ -288,7 +288,7 @@
           }));
         }
       }
-      // Auto-warm top 10 songs whenever search/related/trending results arrive so EVERY tap plays in 0.2-0.5s
+      // Auto-warm top 12 songs whenever search/related/trending results arrive so EVERY tap plays in 0.1-0.3s
       if (typeof resource === 'string' && (resource.includes('/api/yt/search') || resource.includes('/api/yt/related') || resource.includes('/api/search/songs'))) {
         return _origFetch.apply(this, arguments).then(res => {
           try {
@@ -296,7 +296,7 @@
               res.clone().json().then(data => {
                 const list = Array.isArray(data) ? data : (data?.data?.results || data?.queue || []);
                 if (Array.isArray(list) && list.length && window.__pfWarm) {
-                  window.__pfWarm(list.slice(0, 10).map(s => s.videoId || s.id).filter(Boolean));
+                  window.__pfWarm(list.slice(0, 12).map(s => s.videoId || s.id).filter(Boolean));
                 }
               }).catch(() => {});
             }
