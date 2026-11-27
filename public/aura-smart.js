@@ -163,23 +163,21 @@
         const idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
         const curSong = queue[idx];
         const nextSong = queue[idx + 1];
-        const nextPlusOne = queue[idx + 2];
-        const nextPlusTwo = queue[idx + 3];
-        const nextPlusThree = queue[idx + 4];
 
         // 1. Immediately buffer the NEXT upcoming song (0.2s skip playback)
         if (nextSong) preloadUpcomingSong(nextSong, true);
 
-        // 2. Pre-resolve stream URLs for next+1 .. next+3 immediately in parallel
-        if (nextPlusOne) preloadUpcomingSong(nextPlusOne, false);
-        if (nextPlusTwo) preloadUpcomingSong(nextPlusTwo, false);
-        if (nextPlusThree) preloadUpcomingSong(nextPlusThree, false);
+        // 2. Pre-resolve stream URLs for the next 10 songs in parallel (instant skip-skip-skip!)
+        for (let offset = 2; offset <= 10; offset++) {
+          const upcoming = queue[idx + offset];
+          if (upcoming) preloadUpcomingSong(upcoming, false);
+        }
 
-        // 3. Proactive queue refill: if <= 3 songs remain ahead, pre-warm related list NOW so there is zero 5s break
-        if (curSong && (queue.length - 1 - idx) <= 3 && window.__auraRelated?.load) {
+        // 3. Proactive queue refill: if <= 5 songs remain ahead, pre-warm related list NOW
+        if (curSong && (queue.length - 1 - idx) <= 5 && window.__auraRelated?.load) {
           window.__auraRelated.load(curSong, (relList) => {
             if (Array.isArray(relList) && relList.length && window.__pfWarm) {
-              window.__pfWarm(relList.slice(0, 5).map(s => s.videoId || s.id));
+              window.__pfWarm(relList.slice(0, 10).map(s => s.videoId || s.id));
             }
           });
         }
@@ -205,22 +203,34 @@
     }
   });
 
-  // Track playback timeupdate: ensure next track is buffered when current song passes 50%
+  // Track playback timeupdate:
+  // 1) Ensure next 10 tracks are buffered when current song passes 45%
+  // 2) Auto-advance 5.5s before song ends so playback never gets stuck at 0:00!
   window.addEventListener('timeupdate', (e) => {
     const a = e.target;
-    if (a && a.tagName === 'AUDIO' && a.duration > 0 && a.currentTime / a.duration > 0.45) {
+    if (!a || a.tagName !== 'AUDIO' || a.id === 'aura-shadow-preloader') return;
+    if (a.duration > 0 && a.currentTime / a.duration > 0.45) {
       if (!a._auraPreloadedNext) {
         a._auraPreloadedNext = true;
         triggerImmediateQueuePreload();
       }
     }
+    if (!a.paused && isFinite(a.duration) && a.duration > 15) {
+      const rem = a.duration - a.currentTime;
+      if (rem > 0 && rem <= 5.5 && !a._auraAutoAdvanced) {
+        a._auraAutoAdvanced = true;
+        const nextBtn = document.querySelector('button[title*="Next" i], button[aria-label*="Next" i]');
+        if (nextBtn) nextBtn.click();
+      }
+    }
   }, true);
 
-  // Play event: reset flag and trigger preload for new track
+  // Play event: reset flags and trigger preload for new track + next 10
   window.addEventListener('play', (e) => {
     const a = e.target;
     if (a && a.tagName === 'AUDIO' && a.id !== 'aura-shadow-preloader') {
       a._auraPreloadedNext = false;
+      a._auraAutoAdvanced = false;
       triggerImmediateQueuePreload();
     }
   }, true);

@@ -78,14 +78,14 @@
     return hit.p.then(function (r) { return r ? r.clone() : fallback(); });
   };
 
-  // Warm next 5 songs immediately when current song starts (0.2s skip)
+  // Warm next 10 songs immediately when current song starts (instant skip-skip-skip)
   document.addEventListener('play', function (e) {
     if (!e.target || e.target.tagName !== 'AUDIO' || e.target.id === 'aura-shadow-preloader') return;
     try {
       var queue = JSON.parse(localStorage.getItem('auramusic_queue') || '[]');
       var idx = parseInt(localStorage.getItem('auramusic_queue_index') || '0', 10);
       var nextIds = [];
-      for (var i = idx + 1; i <= idx + 5 && i < queue.length; i++) {
+      for (var i = idx + 1; i <= idx + 10 && i < queue.length; i++) {
         var s = queue[i];
         var v = s && (s.videoId || (s.id && s.id.replace(/^yt[-_]/, '')));
         if (v) nextIds.push(v);
@@ -285,7 +285,7 @@
     return false;
   }
 
-  // ── Fetch related songs from server (with 0ms memory cache) ─────────────
+  // ── Fetch related songs from Mochy YT Music Radio (no tracking, no reordering) ──
   var relatedCache = {};
   function fetchRelated(seed, done, fail) {
     var vid = videoId(seed);
@@ -293,46 +293,31 @@
       done(relatedCache[vid].list);
       return;
     }
-    var lang = tasteLang();
     var url = '/api/yt/related'
       + '?id=' + encodeURIComponent(vid)
       + '&title=' + encodeURIComponent(seed.name || '')
-      + '&artist=' + encodeURIComponent(seed.artist || '')
-      + '&lang=' + encodeURIComponent(lang)
-      + '&hist=' + encodeURIComponent(history.slice(-12).map(function(h) {
-          return String(h.name || '').replace(/[|;]/g, ' ')
-            + '|' + String(h.artist || '').replace(/[|;]/g, ' ');
-        }).join(';'));
+      + '&artist=' + encodeURIComponent(seed.artist || '');
 
     fetch(url)
       .then(function(r) { return r.ok ? r.json() : []; })
       .then(function(list) {
         if (!Array.isArray(list) || !list.length) { fail(); return; }
-        var taste = tasteLang();
-        var locked = applyTasteLock(list, taste);
-        var finalList = locked.length ? locked : list;
-        if (vid) relatedCache[vid] = { t: Date.now(), list: finalList };
-        if (window.__pfWarm) window.__pfWarm(finalList.slice(0, 5).map(videoId));
-        done(finalList);
+        if (vid) relatedCache[vid] = { t: Date.now(), list: list };
+        if (window.__pfWarm) window.__pfWarm(list.slice(0, 10).map(videoId));
+        done(list);
       })
       .catch(function() { fail(); });
   }
 
-  // ── Merge: insert related right after current song, skip played/duplicates ──
+  // ── Merge: keep exact Mochy playtrack order, append only new songs ──
   function merge(cur, queue, add) {
     var have = {};
     queue.forEach(function(s) { have[s.id] = true; });
-    // Taste Lock on merge too
-    var taste = tasteLang();
-    var filtered = applyTasteLock(add, taste);
-    var fresh = filtered.filter(function(s) {
-      return !have[s.id] && !same(s.name, cur.name) && !wasPlayed(s);
+    var fresh = (add || []).filter(function(s) {
+      return s && s.id && !have[s.id];
     });
-    if (!fresh.length) {
-      fresh = (add || []).filter(function(s) { return !have[s.id] && !same(s.name, cur.name); });
-    }
     var at = queue.findIndex(function(s) { return s.id === cur.id; });
-    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 5).map(videoId));
+    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 10).map(videoId));
     if (at < 0) return queue.concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
   }
@@ -341,68 +326,32 @@
 
   window.__auraRelated = {
     same: same,
-    played: played,
-    wasPlayed: wasPlayed,
+    played: function() {},
+    wasPlayed: function() { return false; },
     merge: merge,
-    tasteLang: tasteLang,
+    tasteLang: function() { return ''; },
     songLang: songLang,
 
     playRelated: function(cur, ok, fail) {
-      var seeds = [cur];
-      var past = recent().filter(function(h) { return h.id !== cur.id; }).slice(-3).reverse();
-      past.forEach(function(h) {
-        seeds.push({ id: h.id, videoId: h.videoId, name: h.name, artist: h.artist });
-      });
-      var i = 0;
-      (function tryNext() {
-        if (i >= seeds.length) { fail(); return; }
-        var seed = seeds[i++];
-        fetchRelated(seed, function(list) {
-          var fresh = list.filter(function(s) { return !wasPlayed(s) && !same(s.name, cur.name); });
-          if (fresh.length) ok(fresh); else tryNext();
-        }, tryNext);
-      })();
+      fetchRelated(cur, function(list) {
+        if (list.length) ok(list); else fail();
+      }, fail);
     },
 
-    // ── DUPLICATE REMOVAL: even 1 duplicate triggers trim (was 2) ──────────
-    needs: function(cur, list) {
-      if (fromSearch()) return true;       // tapped from search results: build the singer flow instead
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== cur.id && same(list[i].name, cur.name)) return true;
-      }
-      return false;
-    },
-    trim: function(cur, list) {
-      if (fromSearch()) {
-        // The rest of the search list is just look-alike titles. Keep what is before the song, drop what is after;
-        // the server then sends this singer's popular songs, then similar singers.
-        var at = list.findIndex(function(s) { return s.id === cur.id; });
-        return at < 0 ? list : list.slice(0, at + 1);
-      }
-      // Keep only the BEST version (first occurrence = highest quality from server)
-      return cleanQueue(cur, list);
-    },
+    needs: function() { return false; },
+    trim: function(cur, list) { return list; },
     load: function(cur, done) {
       fetchRelated(cur, done, function() {});
     },
 
-    // Keep 6+ fresh songs queued after current so queue never stalls at the bottom
+    // Keep 10+ songs ahead in queue so skipping 10 times is instant & never stalls
     topUp: function(cur, queue, setQueue, toSong) {
       if (!isYt(cur)) return;
-      var cleaned = cleanQueue(cur, queue);
-      if (cleaned.length !== queue.length) { setQueue(cleaned); queue = cleaned; }
       if (topping[cur.id]) return;
       var at = queue.findIndex(function(s) { return s.id === cur.id; });
       if (at < 0) return;
-      var taste = tasteLang();
-      var ahead = 0;
-      for (var i = at + 1; i < queue.length; i++) {
-        var s = queue[i];
-        if (!wasPlayed(s) && !same(s.name, cur.name)) {
-          if (!taste || songLang(s.name, s.artist) !== 'en') ahead++;
-        }
-      }
-      if (ahead >= 6) return;
+      var ahead = Math.max(0, queue.length - 1 - at);
+      if (ahead >= 10) return;
       topping[cur.id] = true;
       fetchRelated(cur, function(list) {
         setQueue(function(q) { return merge(cur, q, list.map(toSong)); });

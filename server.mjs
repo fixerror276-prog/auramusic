@@ -1244,127 +1244,28 @@ async function searchYTMusicInnerTube(query) {
           source: 'AuraMusic Live'
         });
 
-        const picked = [];
-        const take = list => {
-          for (const v of list) {
-            if (!v?.videoId || v.videoId === id || !v.title) continue;
-            const dur = Number(v.duration) || 0;
-            if (dur && (dur < 60 || dur > 600)) continue;
-            if (sameSong(v.title, title)) continue;              // duplicate version of same song
-            if (picked.some(p => p.videoId === v.videoId || sameSong(p.title, v.title))) continue; // already have it
-            picked.push(v);
-          }
-        };
-
-        // ── Taste Lock: determine language from client signal + song signal ──
-        const recent = (parsedUrl.searchParams.get('hist') || '').split(';').slice(0, 12)
-          .map(x => { const [n, a] = x.split('|'); return { name: n || '', artist: a || '' }; });
-
-        // Client already computed taste; trust it. Fallback to our own detection.
-        let wantIndian;
-        if (clientLang === 'in') wantIndian = true;
-        else if (clientLang === 'en') wantIndian = false;
-        else wantIndian = prefersIndian({ title, artist }, recent);
-
-        // Strict filter when lang is explicitly set by client (Taste Lock ON)
-        const strictLock = clientLang === 'in';
-        const seedMood = songMood(title, artist);
-        const fit = list0 => {
-          const list = fitMood(seedMood, list0); // love songs never get party / rowdy songs
-          if (!wantIndian) return list;
-          const filtered = keepIndian(list);
-          // In strict mode, never let foreign songs in; in soft mode, allow if too few results
-          if (strictLock) return filtered;
-          return filtered.length >= 3 ? filtered : keepIndian(list);
-        };
-
+        // Pure Mochy YT Music Radio (RDAMVM) — preserve exact Mochy track order, no tracking/reordering
+        const seenIds = new Set([id]);
+        let rel = [];
         try {
-          const rel = await Promise.race([getRelated(id), new Promise(r => setTimeout(() => r([]), 2500))]);
-          take(fit(rel || []));
+          rel = await Promise.race([getRelated(id), new Promise(r => setTimeout(() => r([]), 3000))]);
         } catch (_) {}
 
-        const asVideos = found => found.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
-
-        // Mood & Style clustering: Karan Aujla / Punjabi Swag vs Badmashi vs Romantic vs HipHop
-        const moodText = `${title} ${artist}`.toLowerCase();
-        const isPunjabiGangster = /(karan aujla|moose|shubh|dhillon|amrit maan|prem dhillon|jerry|jordan sandhu|wazir patar|badmashi|jatt|gang|shooter|pistol|bandook|yarri|swag)/i.test(moodText);
-        const isHaryanvi = /(masoom sharma|ajay hooda|diler kharkiya|khasa aala|gulzaar|amit saini|badmashi|haryanvi)/i.test(moodText);
-        const isHipHop = /(divine|mc stan|seedhe maut|raftaar|kr\$na|king|emiway)/i.test(moodText);
-
-        const PUNJABI_TOP = ['Karan Aujla', 'Sidhu Moose Wala', 'Shubh', 'AP Dhillon', 'Diljit Dosanjh', 'Amrit Maan', 'Prem Dhillon', 'Wazir Patar'];
-        const HARYANVI_TOP = ['Masoom Sharma', 'Ajay Hooda', 'Diler Kharkiya', 'Khasa Aala Chahar', 'Gulzaar Chhaniwala'];
-        const HIPHOP_TOP = ['DIVINE', 'MC Stan', 'Seedhe Maut', 'Raftaar', 'KR$NA', 'King', 'Emiway'];
-
-        if (picked.length < 10) {
-          if (isPunjabiGangster) {
-            const artistPick = PUNJABI_TOP[Math.floor(Math.random() * PUNJABI_TOP.length)];
-            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} punjabi top hit songs`))));
-          } else if (isHaryanvi) {
-            const artistPick = HARYANVI_TOP[Math.floor(Math.random() * HARYANVI_TOP.length)];
-            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} haryanvi badmashi songs`))));
-          } else if (isHipHop) {
-            const artistPick = HIPHOP_TOP[Math.floor(Math.random() * HIPHOP_TOP.length)];
-            take(keepIndian(asVideos(await searchYTMusicInnerTube(`${artistPick} desi hip hop rap`))));
-          } else if (seedMood === 'romantic') {
-            const artistPick = ROMANTIC_TOP[Math.floor(Math.random() * ROMANTIC_TOP.length)];
-            take(fit(asVideos(await searchYTMusicInnerTube(`${artistPick} romantic hindi songs`))));
-          } else {
-            const cleanArt = (artist || title).split(',')[0].trim();
-            take(fit(asVideos(await searchYTMusicInnerTube(`${cleanArt} best songs`))));
-          }
-        }
-        if (picked.length < 8 && wantIndian) {
-          const pool = seedMood === 'romantic' ? ROMANTIC_TOP : TRENDING_ARTISTS;
-          const pick = pool[Math.floor(Math.random() * pool.length)];
-          take(fit(asVideos(await searchYTMusicInnerTube(`${pick} ${seedMood === 'romantic' ? 'romantic ' : ''}top songs`))));
-        }
-        // If still not enough and English taste, add English similar songs
-        if (picked.length < 8 && !wantIndian && clientLang !== 'in') {
-          take(asVideos(await searchYTMusicInnerTube(`${(artist || title).split(',')[0].trim()} best songs`)));
+        if (!Array.isArray(rel) || rel.length === 0) {
+          const q = `${title || ''} ${artist || ''}`.trim() || 'trending hindi songs';
+          const fallback = await searchYTMusicInnerTube(q).catch(() => []);
+          rel = fallback.map(s => ({ videoId: s.videoId, title: s.name, artist: s.artist, duration: s.duration, image: s.image }));
         }
 
-        // ── Singer flow: 2-4 popular songs of the singer you played, then a similar singer, and so on ──
-        const LABEL = /(t-?series|sony music|zee music|tips|saregama|speed records|times music|yrf|yash raj|eros|lahari|vevo|records|music company|films|official|unknown artist|topic$|^various)/i;
-        const singerOf = v => String(v.artist || '').replace(/\s*-\s*topic$/i, '').split(/[,&]|\bfeat\.?\b|\bft\.?\b|\bx\b/i)[0].trim();
-        const isSinger = n => n && n.length > 2 && !LABEL.test(n);
-        const norm = n => n.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-
-        const order = [];                       // singers in play order
-        const addSinger = n => { if (isSinger(n) && !order.some(o => norm(o) === norm(n))) order.push(n); };
-        addSinger(singerOf({ artist }));
-        for (const v of picked) addSinger(singerOf(v));
-        const singers = order.slice(0, 6);
-
-        const byFlow = [];
-        const known = new Set();
-        const pushFlow = v => {
-          if (!v?.videoId || v.videoId === id || known.has(v.videoId)) return false;
-          if (sameSong(v.title, title) || byFlow.some(b => sameSong(b.title, v.title))) return false;
-          const dur = Number(v.duration) || 0;
-          if (dur && (dur < 60 || dur > 600)) return false;
-          if (/(station|jukebox|non[- ]?stop|full album|playlist|mashup|\bmix\b|\d+ hours?)/i.test(v.title)) return false;
-          known.add(v.videoId); byFlow.push(v); return true;
-        };
-
-        if (singers.length) {
-          // Each singer's own popular songs (searched in parallel), falling back to what related already found.
-          const groups = await Promise.all(singers.map(async n => {
-            const own = picked.filter(v => norm(singerOf(v)) === norm(n));
-            let found = [];
-            try { found = fit(asVideos(await searchYTMusicInnerTube(`${n} popular songs`))); } catch (_) {}
-            found = found.filter(v => norm(singerOf(v)) === norm(n) || norm(String(v.artist || '')).includes(norm(n)));
-            return [...own, ...found];
-          }));
-          // 3 from the played singer, then 3, 3, 2, ... from the next singers
-          const take = [3, 3, 3, 3, 2, 2];
-          groups.forEach((g, gi) => { let got = 0; for (const v of g) { if (got >= take[gi]) break; if (pushFlow(v)) got++; } });
+        const outSongs = [];
+        for (const v of rel) {
+          if (!v?.videoId || seenIds.has(v.videoId) || !v.title) continue;
+          seenIds.add(v.videoId);
+          outSongs.push(toSong(v));
+          if (outSongs.length >= 25) break;
         }
-        // Anything else related still fills the queue after the flow.
-        for (const v of limitPerArtist(picked, 2)) pushFlow(v);
 
-        const result = byFlow.length >= 4 ? byFlow : limitPerArtist(picked, 2);
-        const outSongs = result.slice(0, 20).map(toSong);
-        warmAudio(outSongs.slice(0, 6).map(s => s.videoId));
+        warmAudio(outSongs.slice(0, 10).map(s => s.videoId));
         res.setHeader('Cache-Control', 'public, max-age=120');
         return sendJson(res, 200, outSongs);
       }
