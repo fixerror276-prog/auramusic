@@ -1100,7 +1100,9 @@ async function searchYTMusicInnerTube(query) {
 
   if (songs.length > 0) {
     searchCache.set(norm, { time: Date.now(), data: songs });
-    warmAudio(songs.slice(0, 10).map(s => s.videoId));
+    // Immediately warm top 3 synchronously in background without waiting
+    Promise.all(songs.slice(0, 3).map(s => resolveAudio(s.videoId).catch(() => {})));
+    warmAudio(songs.slice(3, 12).map(s => s.videoId));
   }
   return songs;
 }
@@ -1265,7 +1267,9 @@ async function searchYTMusicInnerTube(query) {
           if (outSongs.length >= 25) break;
         }
 
-        warmAudio(outSongs.slice(0, 10).map(s => s.videoId));
+        // Proactively resolve stream URLs for the first 3 songs in background immediately
+        Promise.all(outSongs.slice(0, 3).map(s => resolveAudio(s.videoId).catch(() => {})));
+        warmAudio(outSongs.slice(3, 12).map(s => s.videoId));
         res.setHeader('Cache-Control', 'public, max-age=120');
         return sendJson(res, 200, outSongs);
       }
