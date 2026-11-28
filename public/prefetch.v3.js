@@ -156,27 +156,53 @@
       .catch(function() { if (fail) fail(); });
   }
 
+  function cleanTitle(str) {
+    return String(str || '')
+      .toLowerCase()
+      .replace(/\(.*?\)|\[.*?\]/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+  }
+
   function merge(cur, queue, add) {
-    var have = {};
+    var haveIds = {};
+    var haveTitles = {};
+    var curVid = videoId(cur);
+    var curTitle = cur ? cleanTitle(cur.name || cur.title) : '';
+    if (curTitle) haveTitles[curTitle] = true;
+    if (curVid) haveIds[curVid] = true;
+
     (queue || []).forEach(function(s) {
       if (s) {
         var v = videoId(s);
-        if (v) have[v] = true;
-        if (s.id) have[s.id] = true;
+        if (v) haveIds[v] = true;
+        if (s.id) haveIds[s.id] = true;
+        var t = cleanTitle(s.name || s.title);
+        if (t) haveTitles[t] = true;
       }
     });
+
     var fresh = (add || []).filter(function(s) {
       if (!s) return false;
       var v = videoId(s);
-      return (!v || !have[v]) && (!s.id || !have[s.id]);
+      var t = cleanTitle(s.name || s.title);
+      // Strictly prevent duplicate ID or duplicate song title!
+      if (v && haveIds[v]) return false;
+      if (s.id && haveIds[s.id]) return false;
+      if (t && haveTitles[t]) return false;
+      if (v) haveIds[v] = true;
+      if (s.id) haveIds[s.id] = true;
+      if (t) haveTitles[t] = true;
+      return true;
     });
-    var curVid = videoId(cur);
+
     var at = (queue || []).findIndex(function(s) {
       return (s && (s.id === cur.id || (curVid && videoId(s) === curVid)));
     });
-    // Immediately warm next 3 upcoming songs
+
+    // Immediately warm next 5 upcoming songs
     if (window.__pfWarm && fresh.length) {
-      window.__pfWarm(fresh.slice(0, 3).map(videoId));
+      window.__pfWarm(fresh.slice(0, 5).map(videoId));
     }
     if (at < 0) return (queue || []).concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
@@ -185,21 +211,27 @@
   var topping = {};
 
   window.__auraRelated = {
-    // Only fetch new related songs if we don't already have enough upcoming songs
+    // Determine if fresh Mochy radio tracks need to be loaded
     needs: function(cur, list) {
-      if (!list || !list.length) return true;
+      if (!list || list.length <= 1) return true;
       var curVid = videoId(cur);
       var at = list.findIndex(function(s) {
         return s && (s.id === cur.id || (curVid && videoId(s) === curVid));
       });
-      // If cur is in list and there are at least 3 upcoming songs, keep the existing Mochy queue!
-      if (at >= 0 && (list.length - 1 - at) >= 3) {
-        return false;
+      // If current song is missing or less than 5 upcoming songs, fetch more from Mochy Radio
+      if (at < 0 || (list.length - 1 - at) < 5) {
+        return true;
       }
-      return true;
+      // Check if upcoming queue contains duplicate titles of the current song
+      var curTitle = cleanTitle(cur.name || cur.title);
+      var hasDup = list.slice(at + 1).some(function(s) {
+        return s && cleanTitle(s.name || s.title) === curTitle;
+      });
+      if (hasDup) return true;
+      return false;
     },
 
-    // When playing a song, preserve upcoming Mochy songs in queue instead of cutting to length 1!
+    // Preserve upcoming Mochy songs in queue and deduplicate repeat titles
     trim: function(cur, list) {
       if (!list || !list.length) return [cur];
       var curVid = videoId(cur);
@@ -207,8 +239,17 @@
         return s && (s.id === cur.id || (curVid && videoId(s) === curVid));
       });
       if (at >= 0) {
-        // Current song becomes the active point, and all upcoming songs remain ahead of it!
-        return list.slice(at);
+        var seenTitles = {};
+        var curTitle = cleanTitle(cur.name || cur.title);
+        if (curTitle) seenTitles[curTitle] = true;
+        var upcoming = list.slice(at + 1).filter(function(s) {
+          if (!s) return false;
+          var t = cleanTitle(s.name || s.title);
+          if (t && seenTitles[t]) return false;
+          if (t) seenTitles[t] = true;
+          return true;
+        });
+        return [list[at]].concat(upcoming);
       }
       return [cur];
     },
@@ -217,6 +258,9 @@
 
     same: function(a, b) {
       if (!a || !b) return false;
+      var c1 = cleanTitle(a);
+      var c2 = cleanTitle(b);
+      if (c1 && c2 && c1 === c2) return true;
       return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
     },
 
@@ -228,12 +272,15 @@
     // Instant Skip: Return cached Mochy related tracks synchronously whenever available!
     playRelated: function(cur, ok, fail) {
       var vid = videoId(cur);
+      var curTitle = cur ? cleanTitle(cur.name || cur.title) : '';
       if (vid && relatedCache[vid] && Array.isArray(relatedCache[vid].list) && relatedCache[vid].list.length) {
         var cached = relatedCache[vid].list.filter(function(s) {
-          return s && s.id !== cur.id && videoId(s) !== vid;
+          if (!s || s.id === cur.id || videoId(s) === vid) return false;
+          if (curTitle && cleanTitle(s.name || s.title) === curTitle) return false;
+          return true;
         });
         if (cached.length) {
-          if (window.__pfWarm) window.__pfWarm(cached.slice(0, 3).map(videoId));
+          if (window.__pfWarm) window.__pfWarm(cached.slice(0, 5).map(videoId));
           ok(cached);
           return;
         }
@@ -241,10 +288,12 @@
       fetchRelated(cur, function(list) {
         if (list && list.length) {
           var nextList = list.filter(function(s) {
-            return s && s.id !== cur.id && videoId(s) !== vid;
+            if (!s || s.id === cur.id || videoId(s) === vid) return false;
+            if (curTitle && cleanTitle(s.name || s.title) === curTitle) return false;
+            return true;
           });
           if (nextList.length) {
-            if (window.__pfWarm) window.__pfWarm(nextList.slice(0, 3).map(videoId));
+            if (window.__pfWarm) window.__pfWarm(nextList.slice(0, 5).map(videoId));
             ok(nextList);
           } else if (fail) {
             fail();

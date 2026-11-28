@@ -335,6 +335,13 @@ export async function getRelated(idOrUnused, maybeId) {
   if (cached) return cached;
 
   return dedupe(key, async () => {
+    const seenTitles = new Set();
+    const cleanTitle = (str) => String(str || '')
+      .toLowerCase()
+      .replace(/\(.*?\)|\[.*?\]/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+
     // 1. Try Mochy Music REST API related queue
     try {
       const resMochy = await fetch(`${MOCHY_API_BASE}/api/song/${encodeURIComponent(id)}/related`, {
@@ -343,20 +350,23 @@ export async function getRelated(idOrUnused, maybeId) {
       if (resMochy.ok) {
         const d = await resMochy.json();
         if (d && d.success && Array.isArray(d.tracks) && d.tracks.length > 0) {
-          const items = d.tracks
-            .filter(t => (t.id || t.videoId) && (t.id || t.videoId) !== id)
-            .map(t => {
-              const vid = t.id || t.videoId;
-              const thumbs = t.thumbnails || [];
-              const rawImg = t.thumbnail || thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
-              return {
-                videoId: vid,
-                title: t.title,
-                artist: t.artist || 'Unknown Artist',
-                duration: t.durationSeconds || parseDurationStr(t.duration),
-                image: rawImg
-              };
+          const items = [];
+          for (const t of d.tracks) {
+            const vid = t.id || t.videoId;
+            if (!vid || vid === id) continue;
+            const cTitle = cleanTitle(t.title);
+            if (cTitle && seenTitles.has(cTitle)) continue;
+            if (cTitle) seenTitles.add(cTitle);
+            const thumbs = t.thumbnails || [];
+            const rawImg = t.thumbnail || thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+            items.push({
+              videoId: vid,
+              title: t.title,
+              artist: t.artist || 'Unknown Artist',
+              duration: t.durationSeconds || parseDurationStr(t.duration),
+              image: rawImg
             });
+          }
           if (items.length > 0) {
             setCached(key, items, RELATED_TTL_MS);
             return items;
@@ -398,6 +408,9 @@ export async function getRelated(idOrUnused, maybeId) {
         const v = entry?.playlistPanelVideoRenderer;
         if (!v?.videoId || v.videoId === id) continue;
         const title = (v.title?.runs || []).map(r => r.text).join('').trim();
+        const cTitle = cleanTitle(title);
+        if (cTitle && seenTitles.has(cTitle)) continue;
+        if (cTitle) seenTitles.add(cTitle);
         const artist = (v.longBylineText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'Unknown Artist').trim();
         const thumbs = v.thumbnail?.thumbnails || [];
         const image = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;

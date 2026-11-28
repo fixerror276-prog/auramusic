@@ -1047,6 +1047,13 @@ async function searchYTMusicInnerTube(query) {
 
   const songs = [];
   const seen = new Set();
+  const seenTitles = new Set();
+  const cleanTitle = (str) => String(str || '')
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+
   const parseDuration = (str) => {
     const m = String(str || '').match(/(\d+):(\d{2})(?::(\d{2}))?/);
     if (!m) return 200;
@@ -1065,9 +1072,14 @@ async function searchYTMusicInnerTube(query) {
         for (const r of mData.results) {
           const vid = r.videoId || r.id;
           if (!vid || seen.has(vid)) continue;
-          seen.add(vid);
 
           const title = r.title || query;
+          const cTitle = cleanTitle(title);
+          if (cTitle && seenTitles.has(cTitle)) continue; // Never return duplicate/remix versions of the same title
+
+          seen.add(vid);
+          if (cTitle) seenTitles.add(cTitle);
+
           const artist = r.artist || (r.artists?.[0]?.name) || 'Unknown Artist';
           const album = r.album?.name || (typeof r.album === 'string' ? r.album : 'YouTube Music');
           const rawImg = r.thumbnail || r.thumbnails?.[r.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
@@ -1372,6 +1384,15 @@ async function searchYTMusicInnerTube(query) {
 
         // Pure Mochy YT Music Radio (RDAMVM) — preserve exact Mochy track order, no tracking/reordering
         const seenIds = new Set([id]);
+        const seenTitles = new Set();
+        const cleanTitle = (str) => String(str || '')
+          .toLowerCase()
+          .replace(/\(.*?\)|\[.*?\]/g, '')
+          .replace(/[^a-z0-9]/g, '')
+          .trim();
+        const seedTitle = cleanTitle(title);
+        if (seedTitle) seenTitles.add(seedTitle);
+
         let rel = [];
         try {
           rel = await Promise.race([getRelated(id), new Promise(r => setTimeout(() => r([]), 3000))]);
@@ -1386,25 +1407,29 @@ async function searchYTMusicInnerTube(query) {
         const outSongs = [];
         for (const v of rel) {
           if (!v?.videoId || seenIds.has(v.videoId) || !v.title) continue;
+          const t = cleanTitle(v.title);
+          if (t && seenTitles.has(t)) continue; // Never duplicate the same title or seed song in queue!
+          if (t) seenTitles.add(t);
           seenIds.add(v.videoId);
           outSongs.push(toSong(v));
-          if (outSongs.length >= 25) break;
+          if (outSongs.length >= 35) break;
         }
 
-        // Proactively resolve stream URL for the very next song synchronously so Skip is instant (<0.1s)!
+        // Proactively resolve stream URLs for the top 3 upcoming tracks in parallel so Skip is instantaneous (<0.05s)!
         if (outSongs.length > 0) {
           try {
-            const nextAudio = await Promise.race([
-              resolveAudio(outSongs[0].videoId),
-              new Promise(r => setTimeout(() => r(null), 900))
-            ]);
-            if (nextAudio?.streamUrl) {
-              outSongs[0].streamUrl = nextAudio.streamUrl;
-            }
+            await Promise.allSettled(outSongs.slice(0, 3).map(async (s) => {
+              const aud = await Promise.race([
+                resolveAudio(s.videoId),
+                new Promise(r => setTimeout(() => r(null), 1000))
+              ]).catch(() => null);
+              if (aud?.streamUrl) {
+                s.streamUrl = aud.streamUrl;
+              }
+            }));
           } catch (_) {}
           // Concurrently warm next songs in background
-          Promise.all(outSongs.slice(1, 4).map(s => resolveAudio(s.videoId).catch(() => {})));
-          warmAudio(outSongs.slice(4, 15).map(s => s.videoId));
+          warmAudio(outSongs.slice(3, 15).map(s => s.videoId));
         }
         res.setHeader('Cache-Control', 'public, max-age=120');
         return sendJson(res, 200, outSongs);
