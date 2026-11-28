@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { sendBrevoOtpEmail } from './brevo_mailer.mjs';
 import { redisEnabled, storeKind, kvGetJson, kvSetRaw, syncUserToNeon, syncAllUsersToNeon, syncLikeToNeon, syncPlaylistToNeon, deletePlaylistFromNeon, syncListeningEventToNeon, syncTasteProfileToNeon, syncProfileToNeon, syncPlaylistLikeToNeon, syncSavedPlaylistToNeon, syncUserFollowToNeon } from './store.mjs';
 import { songLanguage, prefersIndian, keepIndian, TRENDING_ARTISTS, songMood, fitMood, limitPerArtist, ROMANTIC_TOP } from './music_taste.mjs';
-import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelated, urlWorksForClient } from './audio_sources.mjs';
+import { resolveAudio, resolveVideo, diagnose, getClientIp, warmAudio, getRelated, urlWorksForClient, MOCHY_API_BASE } from './audio_sources.mjs';
 import { proxyAudio } from './audio_proxy.mjs';
 import { verifyGoogleLogin, GoogleVerifyError } from './google_verify.mjs';
 // Pure Mochy InnerTube Audio Engine (WEB_REMIX Search + ANDROID_VR / IOS Stream)
@@ -351,7 +351,7 @@ function sendJson(res, statusCode, data) {
 
 async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
-  const pathname = parsedUrl.pathname;
+  let pathname = parsedUrl.pathname;
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -364,7 +364,30 @@ async function handleRequest(req, res) {
 
   // --- API Routes ---
   if (pathname.startsWith('/api/')) {
-    if (redisEnabled && !pathname.startsWith('/api/yt/')) {
+    // Mochy Music REST API Route Aliases
+    const songRouteMatch = pathname.match(/^\/api\/song\/([^/]+)(?:\/([a-z0-9_-]+))?$/i);
+    if (songRouteMatch) {
+      const songId = songRouteMatch[1];
+      const action = (songRouteMatch[2] || 'details').toLowerCase();
+      if (action === 'stream') {
+        parsedUrl.searchParams.set('id', songId);
+        parsedUrl.searchParams.set('json', '1');
+        pathname = '/api/yt/stream';
+      } else if (action === 'audio') {
+        parsedUrl.searchParams.set('id', songId);
+        pathname = '/api/yt/stream';
+      } else if (action === 'lyrics') {
+        parsedUrl.searchParams.set('videoId', songId);
+        pathname = '/api/yt/lyrics';
+      } else if (action === 'related') {
+        parsedUrl.searchParams.set('id', songId);
+        pathname = '/api/yt/related';
+      }
+    } else if (pathname === '/api/search') {
+      pathname = '/api/yt/search';
+    }
+
+    if (redisEnabled && !pathname.startsWith('/api/yt/') && !pathname.startsWith('/api/song/') && pathname !== '/api/charts' && pathname !== '/api/search') {
       try {
         await loadState();
       } catch (e) {
@@ -1031,51 +1054,23 @@ async function searchYTMusicInnerTube(query) {
                 : (parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
   };
 
+  // 1. Try high-performance Mochy Music REST API search
   try {
-    const res = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        'Origin': 'https://music.youtube.com',
-        'Referer': 'https://music.youtube.com/'
-      },
-      body: JSON.stringify({
-        query: query.trim(),
-        params: 'EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D',
-        context: {
-          client: {
-            clientName: 'WEB_REMIX',
-            clientVersion: '1.20250101.01.00',
-            hl: 'en',
-            gl: 'IN'
-          }
-        }
-      }),
-      signal: AbortSignal.timeout(4500)
+    const mRes = await fetch(`${MOCHY_API_BASE}/api/search?q=${encodeURIComponent(query.trim())}&filter=songs`, {
+      signal: AbortSignal.timeout(3000)
     });
-    if (res.ok) {
-      const data = await res.json();
-      const tabs = data.contents?.tabbedSearchResultsRenderer?.tabs || [];
-      const sections = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
-      for (const sec of sections) {
-        const items = sec.musicShelfRenderer?.contents || [];
-        for (const item of items) {
-          const r = item.musicResponsiveListItemRenderer;
-          if (!r) continue;
-          const vid = r.playlistItemData?.videoId ||
-            r.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+    if (mRes.ok) {
+      const mData = await mRes.json();
+      if (mData && mData.success && Array.isArray(mData.results)) {
+        for (const r of mData.results) {
+          const vid = r.videoId || r.id;
           if (!vid || seen.has(vid)) continue;
           seen.add(vid);
 
-          const title = r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.map(x => x.text).join('') || query;
-          const subRuns = r.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
-          const subParts = subRuns.map(x => x.text).join('').split('•').map(s => s.trim()).filter(Boolean);
-          const artist = subParts[0] || 'Unknown Artist';
-          const durPart = subParts.find(p => /^\d+:\d{2}/.test(p));
-          const album = (subParts.length >= 2 && !/^\d+:\d{2}/.test(subParts[1])) ? subParts[1] : 'YouTube Music';
-          const thumbs = r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
-          const rawImg = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+          const title = r.title || query;
+          const artist = r.artist || (r.artists?.[0]?.name) || 'Unknown Artist';
+          const album = r.album?.name || (typeof r.album === 'string' ? r.album : 'YouTube Music');
+          const rawImg = r.thumbnail || r.thumbnails?.[r.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
           const image = rawImg.replace(/=w\d+-h\d+/, '=w544-h544');
 
           songs.push({
@@ -1084,18 +1079,88 @@ async function searchYTMusicInnerTube(query) {
             name: title,
             artist,
             album,
-            duration: parseDuration(durPart),
+            duration: Number(r.durationSeconds) || parseDuration(r.duration),
             image,
             url: `/api/yt/stream?id=${vid}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
             genre: 'Music',
             year: new Date().getFullYear().toString(),
-            source: 'Mochy YT Music'
+            source: 'Mochy Music API'
           });
         }
       }
     }
   } catch (e) {
-    console.warn('[YTMusic Search] warning:', e.message);
+    // Continue to fallback
+  }
+
+  // 2. Fallback to direct InnerTube search if Mochy API returned no songs
+  if (songs.length === 0) {
+    try {
+      const res = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Origin': 'https://music.youtube.com',
+          'Referer': 'https://music.youtube.com/'
+        },
+        body: JSON.stringify({
+          query: query.trim(),
+          params: 'EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D',
+          context: {
+            client: {
+              clientName: 'WEB_REMIX',
+              clientVersion: '1.20250101.01.00',
+              hl: 'en',
+              gl: 'IN'
+            }
+          }
+        }),
+        signal: AbortSignal.timeout(4500)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const tabs = data.contents?.tabbedSearchResultsRenderer?.tabs || [];
+        const sections = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+        for (const sec of sections) {
+          const items = sec.musicShelfRenderer?.contents || [];
+          for (const item of items) {
+            const r = item.musicResponsiveListItemRenderer;
+            if (!r) continue;
+            const vid = r.playlistItemData?.videoId ||
+              r.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+            if (!vid || seen.has(vid)) continue;
+            seen.add(vid);
+
+            const title = r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.map(x => x.text).join('') || query;
+            const subRuns = r.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+            const subParts = subRuns.map(x => x.text).join('').split('•').map(s => s.trim()).filter(Boolean);
+            const artist = subParts[0] || 'Unknown Artist';
+            const durPart = subParts.find(p => /^\d+:\d{2}/.test(p));
+            const album = (subParts.length >= 2 && !/^\d+:\d{2}/.test(subParts[1])) ? subParts[1] : 'YouTube Music';
+            const thumbs = r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
+            const rawImg = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+            const image = rawImg.replace(/=w\d+-h\d+/, '=w544-h544');
+
+            songs.push({
+              id: 'yt_' + vid,
+              videoId: vid,
+              name: title,
+              artist,
+              album,
+              duration: parseDuration(durPart),
+              image,
+              url: `/api/yt/stream?id=${vid}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
+              genre: 'Music',
+              year: new Date().getFullYear().toString(),
+              source: 'Mochy YT Music'
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[YTMusic Search] warning:', e.message);
+    }
   }
 
   if (songs.length > 0) {
@@ -1205,11 +1270,44 @@ async function searchYTMusicInnerTube(query) {
         return sendJson(res, 200, results);
       }
 
-      if (pathname === '/api/yt/lyrics') {
-        const title = parsedUrl.searchParams.get('title') || '';
+      if (pathname === '/api/yt/lyrics' || pathname === '/api/song/lyrics') {
+        const title = parsedUrl.searchParams.get('title') || parsedUrl.searchParams.get('track') || '';
         const artist = parsedUrl.searchParams.get('artist') || '';
-        const videoId = parsedUrl.searchParams.get('videoId') || '';
+        const videoId = (parsedUrl.searchParams.get('videoId') || parsedUrl.searchParams.get('id') || '').replace(/^yt[-_]/, '').trim();
         const duration = Number(parsedUrl.searchParams.get('duration') || 0) || undefined;
+
+        // 1. Try Mochy Music REST API (LrcLib Synced & Plain Lyrics)
+        try {
+          const lrcParams = new URLSearchParams();
+          if (title) lrcParams.append('track', title);
+          if (artist) lrcParams.append('artist', artist);
+          if (duration) lrcParams.append('duration', duration);
+          if (videoId) lrcParams.append('id', videoId);
+          const mRes = await fetch(`${MOCHY_API_BASE}/api/lyrics?${lrcParams.toString()}`, {
+            signal: AbortSignal.timeout(2500)
+          });
+          if (mRes.ok) {
+            const data = await mRes.json();
+            if (data && data.success && (data.syncedLyrics || data.plainLyrics)) {
+              const lines = (data.parsedSyncedLyrics || []).map(l => ({
+                time: Math.round(l.time / 1000),
+                text: l.text
+              }));
+              res.setHeader('Cache-Control', 'public, max-age=86400');
+              return sendJson(res, 200, {
+                success: true,
+                synced: !!data.syncedLyrics,
+                plainLyrics: data.plainLyrics || '',
+                syncedLyrics: data.syncedLyrics || '',
+                lines: lines.length > 0 ? lines : undefined,
+                parsedSyncedLyrics: data.parsedSyncedLyrics,
+                source: 'Mochy LrcLib'
+              });
+            }
+          }
+        } catch {}
+
+        // 2. Fallback to existing multi-provider lyrics
         try {
           const data = await fetchMultiProviderLyrics({ title, artist, videoId, duration });
           if (data?.success && Array.isArray(data.lines) && data.lines.length > 0) {
@@ -1225,6 +1323,21 @@ async function searchYTMusicInnerTube(query) {
           }
         } catch {}
         return sendJson(res, 200, { plainLyrics: 'Lyrics unavailable.' });
+      }
+
+      // Charts / Trending API (Mochy Music REST API)
+      if (pathname === '/api/charts') {
+        try {
+          const mRes = await fetch(`${MOCHY_API_BASE}/api/charts`, { signal: AbortSignal.timeout(3000) });
+          if (mRes.ok) {
+            const data = await mRes.json();
+            res.setHeader('Cache-Control', 'public, max-age=3600');
+            return sendJson(res, 200, data);
+          }
+        } catch (e) {
+          console.warn('[CHARTS ERROR]', e.message);
+        }
+        return sendJson(res, 200, { success: false, charts: [] });
       }
 
       // Warm the stream cache for a list of ids: /api/yt/prefetch?ids=a,b,c
@@ -1288,23 +1401,39 @@ async function searchYTMusicInnerTube(query) {
       // ============================================================================
       // Real-Time YouTube Search Suggestions: /api/yt/suggestions?q=query
       // ============================================================================
-      if (pathname === '/api/yt/suggestions') {
-        const query = (parsedUrl.searchParams.get('q') || '').trim();
+      if (pathname === '/api/yt/suggestions' || pathname === '/api/search/suggestions') {
+        const query = (parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query') || '').trim();
         if (!query) {
-          return sendJson(res, 200, { status: 'success', query: '', suggestions: [] });
+          return sendJson(res, 200, { status: 'success', success: true, query: '', suggestions: [] });
         }
+        // 1. Try Mochy Music REST API suggestions
+        try {
+          const mRes = await fetch(`${MOCHY_API_BASE}/api/search/suggestions?q=${encodeURIComponent(query)}`, {
+            signal: AbortSignal.timeout(2000)
+          });
+          if (mRes.ok) {
+            const mData = await mRes.json();
+            if (mData && Array.isArray(mData.suggestions)) {
+              res.setHeader('Cache-Control', 'public, max-age=1800');
+              return sendJson(res, 200, { status: 'success', success: true, query, suggestions: mData.suggestions });
+            }
+          }
+        } catch {}
+
+        // 2. Fallback to Google / YT Suggest
         try {
           const ytSuggestUrl = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(query)}`;
-          const suggestRes = await fetch(ytSuggestUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const suggestRes = await fetch(ytSuggestUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(2000) });
           if (suggestRes.ok) {
             const data = await suggestRes.json();
             const suggestions = Array.isArray(data[1]) ? data[1] : [];
-            return sendJson(res, 200, { status: 'success', query, suggestions });
+            res.setHeader('Cache-Control', 'public, max-age=1800');
+            return sendJson(res, 200, { status: 'success', success: true, query, suggestions });
           }
         } catch (e) {
           console.warn('[SUGGESTIONS ERROR]', e.message);
         }
-        return sendJson(res, 200, { status: 'success', query, suggestions: [] });
+        return sendJson(res, 200, { status: 'success', success: true, query, suggestions: [] });
       }
 
       // ============================================================================

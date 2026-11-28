@@ -16,7 +16,6 @@
   "author": "Google DeepMind Agent",
   "license": "GPL-3.0-or-later",
   "dependencies": {
-    "@distube/ytdl-core": "^5.2.1",
     "crypto-js": "^4.2.0"
   }
 }

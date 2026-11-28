@@ -1,8 +1,10 @@
-// Pure Mochy InnerTube Audio & Video Extractor
-// Uses YouTube InnerTube (ANDROID_VR / IOS) for <300ms unciphered audio/video streams
-// and YT Music InnerTube (WEB_REMIX) for related/up-next radio tracks.
+// Mochy Music REST API & InnerTube Audio Engine
+// Connects to high-performance Mochy Music REST API (https://mochy-music-api.vercel.app)
+// with sub-300ms direct unciphered fallback and in-memory multi-tier caching.
 
+export const MOCHY_API_BASE = 'https://mochy-music-api.vercel.app';
 const INNERTUBE_TIMEOUT_MS = 2500;
+const MOCHY_API_TIMEOUT_MS = 1500;
 const VIDEO_TIMEOUT_MS = 4500;
 const RELATED_TIMEOUT_MS = 3500;
 const STREAM_TTL_MS = 60 * 60 * 1000;
@@ -45,6 +47,20 @@ function pickBest(items, getBitrate, isMp4) {
 // Mochy-Music InnerTube direct player clients (from Mochy YouTubeClient.kt — <300ms unciphered streams)
 const MOCHY_INNERTUBE_CLIENTS = [
   {
+    name: 'IOS',
+    context: {
+      client: {
+        clientName: 'IOS',
+        clientVersion: '21.03.1',
+        osName: 'iOS',
+        osVersion: '18.2.22C152',
+        hl: 'en',
+        gl: 'US'
+      }
+    },
+    ua: 'com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)'
+  },
+  {
     name: 'ANDROID_VR',
     context: {
       client: {
@@ -60,20 +76,6 @@ const MOCHY_INNERTUBE_CLIENTS = [
       }
     },
     ua: 'com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)'
-  },
-  {
-    name: 'IOS',
-    context: {
-      client: {
-        clientName: 'IOS',
-        clientVersion: '21.03.1',
-        osName: 'iOS',
-        osVersion: '18.2.22C152',
-        hl: 'en',
-        gl: 'US'
-      }
-    },
-    ua: 'com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)'
   },
   {
     name: 'VISIONOS',
@@ -223,7 +225,7 @@ function dedupe(key, factory) {
 }
 
 async function getInnerTubeAudio(id) {
-  const key = `innertube:${id}`;
+  const key = `raw_innertube:${id}`;
   const cached = getCached(key);
   if (cached) return cached;
   return dedupe(key, async () => {
@@ -237,26 +239,52 @@ async function getInnerTubeAudio(id) {
   });
 }
 
-// Fills the cache ahead of time using Mochy InnerTube so the first tap on a song is instant.
+// Fills the cache ahead of time using Mochy Music REST API & InnerTube so the first tap on a song is instant.
 export function warmAudio(ids) {
   if (!Array.isArray(ids)) return;
   for (const id of ids) {
     if (!id) continue;
-    getInnerTubeAudio(id).catch(() => {});
+    resolveAudio(id).catch(() => {});
   }
 }
 
-// Returns { streamUrl, source } or null — Pure Mochy InnerTube (ANDROID_VR & IOS).
+// Returns { streamUrl, source } or null — Mochy Music REST API with InnerTube fallback.
 export async function resolveAudio(id) {
-  const cached = getCached(`innertube:${id}`);
+  if (!id) return null;
+  const cleanId = String(id).replace(/^yt[-_]/, '').trim();
+  const cacheKey = `audio:${cleanId}`;
+  const cached = getCached(cacheKey);
   if (cached) {
-    return { streamUrl: cached.url, source: cached.source };
+    return { streamUrl: cached.url || cached.streamUrl, source: cached.source };
   }
-  try {
-    const p = await getInnerTubeAudio(id);
-    if (p?.url) return { streamUrl: p.url, source: p.source };
-  } catch {}
-  return null;
+
+  return dedupe(cacheKey, async () => {
+    const mochyFetch = async () => {
+      const res = await fetch(`${MOCHY_API_BASE}/api/song/${encodeURIComponent(cleanId)}/stream?quality=high`, {
+        signal: AbortSignal.timeout(MOCHY_API_TIMEOUT_MS)
+      });
+      if (!res.ok) throw new Error('mochy api http error');
+      const data = await res.json();
+      if (!data?.success || !data?.streamUrl || !isHttpUrl(data.streamUrl)) {
+        throw new Error('mochy api no stream url');
+      }
+      return { url: data.streamUrl, streamUrl: data.streamUrl, source: 'mochy-music-api' };
+    };
+
+    const directFetch = async () => {
+      const p = await getInnerTubeAudio(cleanId);
+      if (!p?.url) throw new Error('innertube no stream url');
+      return { url: p.url, streamUrl: p.url, source: p.source || 'mochy:innertube' };
+    };
+
+    try {
+      const winner = await Promise.any([mochyFetch(), directFetch()]);
+      setCached(cacheKey, winner, STREAM_TTL_MS);
+      return winner;
+    } catch {
+      return null;
+    }
+  });
 }
 
 // Diagnostic report for Mochy InnerTube clients.
@@ -300,53 +328,88 @@ function parseDurationStr(str) {
 
 // Supports both getRelated(id) and legacy getRelated(client, id) signature used by taste.mjs.
 export async function getRelated(idOrUnused, maybeId) {
-  const id = maybeId || idOrUnused;
+  const id = (maybeId || idOrUnused || '').replace(/^yt[-_]/, '').trim();
   if (!id) return [];
   const key = `related:${id}`;
   const cached = getCached(key);
   if (cached) return cached;
 
   return dedupe(key, async () => {
-    const res = await fetch('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        'Origin': 'https://music.youtube.com'
-      },
-      body: JSON.stringify({
-        videoId: id,
-        playlistId: `RDAMVM${id}`,
-        isAudioOnly: true,
-        context: {
-          client: {
-            clientName: 'WEB_REMIX',
-            clientVersion: '1.20241118.01.00',
-            hl: 'en',
-            gl: 'IN'
+    // 1. Try Mochy Music REST API related queue
+    try {
+      const resMochy = await fetch(`${MOCHY_API_BASE}/api/song/${encodeURIComponent(id)}/related`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      if (resMochy.ok) {
+        const d = await resMochy.json();
+        if (d && d.success && Array.isArray(d.tracks) && d.tracks.length > 0) {
+          const items = d.tracks
+            .filter(t => (t.id || t.videoId) && (t.id || t.videoId) !== id)
+            .map(t => {
+              const vid = t.id || t.videoId;
+              const thumbs = t.thumbnails || [];
+              const rawImg = t.thumbnail || thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+              return {
+                videoId: vid,
+                title: t.title,
+                artist: t.artist || 'Unknown Artist',
+                duration: t.durationSeconds || parseDurationStr(t.duration),
+                image: rawImg
+              };
+            });
+          if (items.length > 0) {
+            setCached(key, items, RELATED_TTL_MS);
+            return items;
           }
         }
-      }),
-      signal: AbortSignal.timeout(RELATED_TIMEOUT_MS)
-    });
-    if (!res.ok) throw new Error(`InnerTube next HTTP ${res.status}`);
-    const data = await res.json();
-    const tabs = data.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs;
-    const contents = tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer?.content?.playlistPanelRenderer?.contents || [];
-    const items = [];
-    for (const entry of contents) {
-      const v = entry?.playlistPanelVideoRenderer;
-      if (!v?.videoId || v.videoId === id) continue;
-      const title = (v.title?.runs || []).map(r => r.text).join('').trim();
-      const artist = (v.longBylineText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'Unknown Artist').trim();
-      const thumbs = v.thumbnail?.thumbnails || [];
-      const image = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
-      const duration = parseDurationStr(v.lengthText?.runs?.[0]?.text);
-      if (title) {
-        items.push({ videoId: v.videoId, title, artist, duration, image });
       }
+    } catch {}
+
+    // 2. Direct InnerTube next fallback
+    try {
+      const res = await fetch('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Origin': 'https://music.youtube.com'
+        },
+        body: JSON.stringify({
+          videoId: id,
+          playlistId: `RDAMVM${id}`,
+          isAudioOnly: true,
+          context: {
+            client: {
+              clientName: 'WEB_REMIX',
+              clientVersion: '1.20241118.01.00',
+              hl: 'en',
+              gl: 'IN'
+            }
+          }
+        }),
+        signal: AbortSignal.timeout(RELATED_TIMEOUT_MS)
+      });
+      if (!res.ok) throw new Error(`InnerTube next HTTP ${res.status}`);
+      const data = await res.json();
+      const tabs = data.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs;
+      const contents = tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer?.content?.playlistPanelRenderer?.contents || [];
+      const items = [];
+      for (const entry of contents) {
+        const v = entry?.playlistPanelVideoRenderer;
+        if (!v?.videoId || v.videoId === id) continue;
+        const title = (v.title?.runs || []).map(r => r.text).join('').trim();
+        const artist = (v.longBylineText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'Unknown Artist').trim();
+        const thumbs = v.thumbnail?.thumbnails || [];
+        const image = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+        const duration = parseDurationStr(v.lengthText?.runs?.[0]?.text);
+        if (title) {
+          items.push({ videoId: v.videoId, title, artist, duration, image });
+        }
+      }
+      if (items.length) setCached(key, items, RELATED_TTL_MS);
+      return items;
+    } catch {
+      return [];
     }
-    if (items.length) setCached(key, items, RELATED_TTL_MS);
-    return items;
   });
 }
