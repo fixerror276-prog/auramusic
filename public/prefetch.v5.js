@@ -5,19 +5,24 @@
   var TTL = 20 * 60 * 1000;
   var clean = function (id) { return String(id || '').replace(/^yt_|^yt-/, '').trim(); };
 
-  // Also pulls the first seconds of the next song into the browser, so skipping does not wait
-  // for the audio to start downloading. Best effort: it only helps if the host allows caching.
+  // Pre-pulls the first seconds of upcoming songs into the browser buffer.
+  // 5-slot pool: oldest evicted when full.
   var preloaders = [];
   function preload(url) {
     try {
+      // Avoid duplicate preloads
+      for (var i = 0; i < preloaders.length; i++) {
+        if (preloaders[i].src === url) return;
+      }
       var a = new Audio();
       a.preload = 'auto';
       a.muted = true;
       a.src = url;
       a.load();
       preloaders.push(a);
-      if (preloaders.length > 2) {
+      if (preloaders.length > 5) {
         var old = preloaders.shift();
+        old.pause();
         old.removeAttribute('src');
         old.load();
       }
@@ -26,24 +31,29 @@
 
   window.__pfWarm = function (ids, preloadFirst) {
     (ids || []).forEach(function (raw, index) {
-      var id = clean(raw);
-      if (!id) return;
-      var hit = store[id];
-      if (!hit || Date.now() - hit.t >= TTL) {
-        hit = store[id] = {
-          t: Date.now(),
-          p: fetch('/api/yt/stream?id=' + encodeURIComponent(id) + '&json=1')
-            .then(function (r) { return r.ok ? r : null; })
-            .catch(function () { return null; })
-        };
-      }
-      if (preloadFirst && index === 0 && !hit.preloaded) {
-        hit.preloaded = true;
-        hit.p.then(function (r) {
-          if (!r) return;
-          r.clone().json().then(function (j) { if (j && j.streamUrl) preload(j.streamUrl); }).catch(function () {});
-        });
-      }
+      // First 3 start immediately, rest staggered 250ms apart — avoids server burst
+      var delay = index < 3 ? 0 : (index - 3) * 250;
+      (function(id, idx) {
+        setTimeout(function() {
+          if (!id) return;
+          var hit = store[id];
+          if (!hit || Date.now() - hit.t >= TTL) {
+            hit = store[id] = {
+              t: Date.now(),
+              p: fetch('/api/yt/stream?id=' + encodeURIComponent(id) + '&json=1')
+                .then(function (r) { return r.ok ? r : null; })
+                .catch(function () { return null; })
+            };
+          }
+          if (preloadFirst && idx === 0 && !hit.preloaded) {
+            hit.preloaded = true;
+            hit.p.then(function (r) {
+              if (!r) return;
+              r.clone().json().then(function (j) { if (j && j.streamUrl) preload(j.streamUrl); }).catch(function () {});
+            });
+          }
+        }, delay);
+      })(clean(raw), index);
     });
   };
 
@@ -232,7 +242,7 @@
     queue.forEach(function (s) { have[s.id] = true; });
     var fresh = add.filter(function (s) { return !have[s.id] && !skip(s, cur); });
     var at = queue.findIndex(function (s) { return s.id === cur.id; });
-    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 3).map(videoId), true);
+    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 10).map(videoId), true);
     if (at < 0) return queue.concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
   }

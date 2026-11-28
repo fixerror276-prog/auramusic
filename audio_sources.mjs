@@ -3,24 +3,37 @@
 // with sub-300ms direct unciphered fallback and in-memory multi-tier caching.
 
 export const MOCHY_API_BASE = 'https://mochy-music-api.vercel.app';
-const INNERTUBE_TIMEOUT_MS = 2500;
-const MOCHY_API_TIMEOUT_MS = 1500;
+const INNERTUBE_TIMEOUT_MS = 2000;   // tighter: fail fast so Promise.any wins sooner
+const MOCHY_API_TIMEOUT_MS = 1200;   // Mochy REST is fast, don't wait too long
 const VIDEO_TIMEOUT_MS = 4500;
 const RELATED_TIMEOUT_MS = 3500;
-const STREAM_TTL_MS = 60 * 60 * 1000;
+const STREAM_TTL_MS = 90 * 60 * 1000;  // 90 min — YT stream URLs last ~6h
 const RELATED_TTL_MS = 30 * 60 * 1000;
+const CACHE_MAX = 1000; // larger cache = more songs stay warm
 
+// LRU cache: Map preserves insertion order; on get we delete+re-insert to move to end
 const cache = new Map(); // key -> { value, expires }
 
 function getCached(key) {
   const hit = cache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.value;
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) { cache.delete(key); return null; }
+  // LRU: move to end (most recently used)
   cache.delete(key);
-  return null;
+  cache.set(key, hit);
+  return hit.value;
 }
 
 function setCached(key, value, ttl) {
-  if (cache.size > 500) cache.delete(cache.keys().next().value);
+  // LRU eviction: delete oldest entries when over limit
+  if (cache.size >= CACHE_MAX) {
+    // Delete first (oldest) CACHE_MAX/10 entries
+    let evicted = 0;
+    for (const k of cache.keys()) {
+      cache.delete(k);
+      if (++evicted >= CACHE_MAX / 10) break;
+    }
+  }
   cache.set(key, { value, expires: Date.now() + ttl });
 }
 
@@ -229,9 +242,22 @@ async function getInnerTubeAudio(id) {
   const cached = getCached(key);
   if (cached) return cached;
   return dedupe(key, async () => {
+    // Fire fastest 2 clients first (IOS + ANDROID_VR — unciphered, no throttle)
+    // After 300ms if no result, fire remaining clients in parallel
+    const fast = MOCHY_INNERTUBE_CLIENTS.slice(0, 2);
+    const slow = MOCHY_INNERTUBE_CLIENTS.slice(2);
+
+    const fastRace = Promise.any(fast.map(c => mochyInnerTubeExtract(c, id)));
+
+    const slowDelayed = new Promise((resolve, reject) => {
+      setTimeout(() => {
+        Promise.any(slow.map(c => mochyInnerTubeExtract(c, id))).then(resolve).catch(reject);
+      }, 300);
+    });
+
     const found = await withTimeout(
-      Promise.any(MOCHY_INNERTUBE_CLIENTS.map(c => mochyInnerTubeExtract(c, id))),
-      INNERTUBE_TIMEOUT_MS + 500,
+      Promise.any([fastRace, slowDelayed]),
+      INNERTUBE_TIMEOUT_MS,
       'innertube'
     );
     setCached(key, found, STREAM_TTL_MS);
@@ -239,19 +265,28 @@ async function getInnerTubeAudio(id) {
   });
 }
 
-// Fills the cache ahead of time using Mochy Music REST API & InnerTube so the first tap on a song is instant.
+// Fills the cache ahead of time — staggered so we don't burst outbound connections.
+// First 3 start immediately (they're about to be played), rest are staggered 150ms apart.
 export function warmAudio(ids) {
   if (!Array.isArray(ids)) return;
-  for (const id of ids) {
-    if (!id) continue;
-    resolveAudio(id).catch(() => {});
-  }
+  const clean = ids.map(id => String(id || '').replace(/^yt[-_]/, '').trim()).filter(Boolean);
+  clean.forEach((id, index) => {
+    const delay = index < 3 ? 0 : (index - 3) * 150; // first 3 immediate, rest staggered
+    if (delay === 0) {
+      resolveAudio(id).catch(() => {});
+    } else {
+      setTimeout(() => resolveAudio(id).catch(() => {}), delay);
+    }
+  });
 }
 
 // Returns { streamUrl, source } or null — Mochy Music REST API with InnerTube fallback.
+// Strategy: try Mochy REST first (fastest, 1.2s timeout). If it doesn't respond in 400ms,
+// fire InnerTube in parallel. First one to succeed wins — instant if cached.
 export async function resolveAudio(id) {
   if (!id) return null;
   const cleanId = String(id).replace(/^yt[-_]/, '').trim();
+  if (!cleanId || cleanId.length < 5) return null;
   const cacheKey = `audio:${cleanId}`;
   const cached = getCached(cacheKey);
   if (cached) {
@@ -263,7 +298,7 @@ export async function resolveAudio(id) {
       const res = await fetch(`${MOCHY_API_BASE}/api/song/${encodeURIComponent(cleanId)}/stream?quality=high`, {
         signal: AbortSignal.timeout(MOCHY_API_TIMEOUT_MS)
       });
-      if (!res.ok) throw new Error('mochy api http error');
+      if (!res.ok) throw new Error('mochy api http error ' + res.status);
       const data = await res.json();
       if (!data?.success || !data?.streamUrl || !isHttpUrl(data.streamUrl)) {
         throw new Error('mochy api no stream url');
@@ -277,11 +312,28 @@ export async function resolveAudio(id) {
       return { url: p.url, streamUrl: p.url, source: p.source || 'mochy:innertube' };
     };
 
+    // Fire Mochy REST immediately. After 400ms if no result yet, fire InnerTube in parallel.
+    // Promise.any returns whichever resolves first.
+    let innerTubeFired = false;
+    const innerTubeDelayed = new Promise((resolve, reject) => {
+      setTimeout(() => {
+        innerTubeFired = true;
+        directFetch().then(resolve).catch(reject);
+      }, 400);
+    });
+
     try {
-      const winner = await Promise.any([mochyFetch(), directFetch()]);
+      const winner = await Promise.any([mochyFetch(), innerTubeDelayed]);
       setCached(cacheKey, winner, STREAM_TTL_MS);
       return winner;
     } catch {
+      // Both failed — last-ditch: try InnerTube directly (in case delay was the issue)
+      if (!innerTubeFired) {
+        try {
+          const fallback = await directFetch();
+          if (fallback?.url) { setCached(cacheKey, fallback, STREAM_TTL_MS); return fallback; }
+        } catch {}
+      }
       return null;
     }
   });

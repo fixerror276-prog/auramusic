@@ -1415,23 +1415,23 @@ async function searchYTMusicInnerTube(query) {
           if (outSongs.length >= 35) break;
         }
 
-        // Proactively resolve stream URLs for the top 3 upcoming tracks in parallel so Skip is instantaneous (<0.05s)!
+        // Proactively resolve stream URLs for the top 5 upcoming tracks in parallel so Skip is instantaneous (<0.05s)!
         if (outSongs.length > 0) {
           try {
-            await Promise.allSettled(outSongs.slice(0, 3).map(async (s) => {
+            await Promise.allSettled(outSongs.slice(0, 5).map(async (s) => {
               const aud = await Promise.race([
                 resolveAudio(s.videoId),
-                new Promise(r => setTimeout(() => r(null), 1000))
+                new Promise(r => setTimeout(() => r(null), 1500))
               ]).catch(() => null);
               if (aud?.streamUrl) {
                 s.streamUrl = aud.streamUrl;
               }
             }));
           } catch (_) {}
-          // Concurrently warm next songs in background
-          warmAudio(outSongs.slice(3, 15).map(s => s.videoId));
+          // Concurrently warm next songs in background — full queue pre-warmed
+          warmAudio(outSongs.slice(3, 20).map(s => s.videoId));
         }
-        res.setHeader('Cache-Control', 'public, max-age=120');
+        res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=3600');
         return sendJson(res, 200, outSongs);
       }
 
@@ -1667,7 +1667,7 @@ async function searchYTMusicInnerTube(query) {
           if (urlWorksForClient(resolved.streamUrl, clientIp)) {
             res.writeHead(307, {
               'Location': resolved.streamUrl,
-              'Cache-Control': 'private, max-age=120',
+              'Cache-Control': 'private, max-age=1800',  // 30 min — stream URLs last ~6h
               'Access-Control-Allow-Origin': '*'
             });
             return res.end();
