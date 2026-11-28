@@ -189,49 +189,14 @@
   });
 
   // Track playback timeupdate:
-  // 1) Ensure next 10 tracks are buffered when current song passes 45%
-  // 2) Auto-advance 5.5s before song ends so playback never gets stuck at 0:00!
+  // Pre-warms next upcoming tracks as song plays so skipping or auto-advance is instant!
   window.addEventListener('timeupdate', (e) => {
     const a = e.target;
     if (!a || a.tagName !== 'AUDIO' || a.id === 'aura-shadow-preloader') return;
-    if (a.duration > 0 && a.currentTime / a.duration > 0.45) {
+    if (a.duration > 0 && a.currentTime / a.duration > 0.4) {
       if (!a._auraPreloadedNext) {
         a._auraPreloadedNext = true;
         triggerImmediateQueuePreload();
-      }
-    }
-    if (!a.paused && isFinite(a.duration) && a.duration > 15) {
-      const rem = a.duration - a.currentTime;
-      if (rem > 0 && rem <= 5.5 && !a._auraAutoAdvanced) {
-        a._auraAutoAdvanced = true;
-        // 1. Try MediaSession next action (direct React playNext hook)
-        let handled = false;
-        try {
-          if (typeof navigator !== 'undefined' && navigator.mediaSession) {
-            // Trigger nexttrack if handler exists
-            const nexttrackHandler = navigator.mediaSession._nexttrackHandler;
-            if (typeof nexttrackHandler === 'function') {
-              nexttrackHandler();
-              handled = true;
-            }
-          }
-        } catch (_) {}
-
-        // 2. Try global or React next buttons
-        if (!handled) {
-          const nextBtn = document.querySelector('button[title*="Next" i], button[aria-label*="Next" i], button svg.lucide-skip-forward')?.closest('button');
-          if (nextBtn) {
-            nextBtn.click();
-            handled = true;
-          }
-        }
-
-        // 3. Fallback: trigger React audio ended event naturally if button query misses
-        if (!handled) {
-          try {
-            a.dispatchEvent(new Event('ended'));
-          } catch (_) {}
-        }
       }
     }
   }, true);

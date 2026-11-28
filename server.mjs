@@ -1391,9 +1391,21 @@ async function searchYTMusicInnerTube(query) {
           if (outSongs.length >= 25) break;
         }
 
-        // Proactively resolve stream URLs for the first 3 songs in background immediately
-        Promise.all(outSongs.slice(0, 3).map(s => resolveAudio(s.videoId).catch(() => {})));
-        warmAudio(outSongs.slice(3, 12).map(s => s.videoId));
+        // Proactively resolve stream URL for the very next song synchronously so Skip is instant (<0.1s)!
+        if (outSongs.length > 0) {
+          try {
+            const nextAudio = await Promise.race([
+              resolveAudio(outSongs[0].videoId),
+              new Promise(r => setTimeout(() => r(null), 900))
+            ]);
+            if (nextAudio?.streamUrl) {
+              outSongs[0].streamUrl = nextAudio.streamUrl;
+            }
+          } catch (_) {}
+          // Concurrently warm next songs in background
+          Promise.all(outSongs.slice(1, 4).map(s => resolveAudio(s.videoId).catch(() => {})));
+          warmAudio(outSongs.slice(4, 15).map(s => s.videoId));
+        }
         res.setHeader('Cache-Control', 'public, max-age=120');
         return sendJson(res, 200, outSongs);
       }

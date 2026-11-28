@@ -115,15 +115,16 @@
   } catch (_) {}
 })();
 
-// ── Pure Mochy Radio Queue & Skip System ─────────────────────────────────────
+// ── Pure Mochy Radio Queue & Instant Skip System ──────────────────────────────
 (function () {
   var isYt = function(s) { return !!s && (String(s.id || '').indexOf('yt_') === 0 || !!s.videoId); };
   var videoId = function(s) { return s.videoId || String(s.id || '').replace(/^yt_|^yt-/, ''); };
 
   var relatedCache = {};
   function fetchRelated(seed, done, fail) {
+    if (!seed) { if (fail) fail(); return; }
     var vid = videoId(seed);
-    if (vid && relatedCache[vid] && Date.now() - relatedCache[vid].t < 10 * 60 * 1000) {
+    if (vid && relatedCache[vid] && Date.now() - relatedCache[vid].t < 15 * 60 * 1000) {
       done(relatedCache[vid].list);
       return;
     }
@@ -137,7 +138,19 @@
       .then(function(list) {
         if (!Array.isArray(list) || !list.length) { if (fail) fail(); return; }
         if (vid) relatedCache[vid] = { t: Date.now(), list: list };
-        if (window.__pfWarm) window.__pfWarm(list.slice(0, 10).map(videoId));
+        // Immediately store streamUrl for songs that have it
+        list.forEach(function(s) {
+          var sVid = videoId(s);
+          if (sVid && s.streamUrl && window.__auraStreamCache) {
+            window.__auraStreamCache.set(sVid, s.streamUrl);
+            window.__auraStreamCache.set('yt_' + sVid, s.streamUrl);
+            window.__auraStreamCache.set('/api/yt/stream?id=' + sVid, s.streamUrl);
+          }
+        });
+        // Pre-warm top 5 upcoming Mochy songs immediately
+        if (window.__pfWarm) {
+          window.__pfWarm(list.slice(0, 5).map(videoId));
+        }
         done(list);
       })
       .catch(function() { if (fail) fail(); });
@@ -145,12 +158,26 @@
 
   function merge(cur, queue, add) {
     var have = {};
-    (queue || []).forEach(function(s) { if (s && s.id) have[s.id] = true; });
-    var fresh = (add || []).filter(function(s) {
-      return s && s.id && !have[s.id];
+    (queue || []).forEach(function(s) {
+      if (s) {
+        var v = videoId(s);
+        if (v) have[v] = true;
+        if (s.id) have[s.id] = true;
+      }
     });
-    var at = (queue || []).findIndex(function(s) { return s.id === cur.id; });
-    if (window.__pfWarm) window.__pfWarm(fresh.slice(0, 10).map(videoId));
+    var fresh = (add || []).filter(function(s) {
+      if (!s) return false;
+      var v = videoId(s);
+      return (!v || !have[v]) && (!s.id || !have[s.id]);
+    });
+    var curVid = videoId(cur);
+    var at = (queue || []).findIndex(function(s) {
+      return (s && (s.id === cur.id || (curVid && videoId(s) === curVid)));
+    });
+    // Immediately warm next 3 upcoming songs
+    if (window.__pfWarm && fresh.length) {
+      window.__pfWarm(fresh.slice(0, 3).map(videoId));
+    }
     if (at < 0) return (queue || []).concat(fresh);
     return queue.slice(0, at + 1).concat(fresh, queue.slice(at + 1));
   }
@@ -158,13 +185,32 @@
   var topping = {};
 
   window.__auraRelated = {
+    // Only fetch new related songs if we don't already have enough upcoming songs
     needs: function(cur, list) {
+      if (!list || !list.length) return true;
+      var curVid = videoId(cur);
+      var at = list.findIndex(function(s) {
+        return s && (s.id === cur.id || (curVid && videoId(s) === curVid));
+      });
+      // If cur is in list and there are at least 3 upcoming songs, keep the existing Mochy queue!
+      if (at >= 0 && (list.length - 1 - at) >= 3) {
+        return false;
+      }
       return true;
     },
 
+    // When playing a song, preserve upcoming Mochy songs in queue instead of cutting to length 1!
     trim: function(cur, list) {
-      var at = (list || []).findIndex(function(s) { return s.id === cur.id; });
-      return at < 0 ? [cur] : list.slice(0, at + 1);
+      if (!list || !list.length) return [cur];
+      var curVid = videoId(cur);
+      var at = list.findIndex(function(s) {
+        return s && (s.id === cur.id || (curVid && videoId(s) === curVid));
+      });
+      if (at >= 0) {
+        // Current song becomes the active point, and all upcoming songs remain ahead of it!
+        return list.slice(at);
+      }
+      return [cur];
     },
 
     merge: merge,
@@ -179,12 +225,30 @@
     tasteLang: function() { return ''; },
     songLang: function() { return ''; },
 
+    // Instant Skip: Return cached Mochy related tracks synchronously whenever available!
     playRelated: function(cur, ok, fail) {
+      var vid = videoId(cur);
+      if (vid && relatedCache[vid] && Array.isArray(relatedCache[vid].list) && relatedCache[vid].list.length) {
+        var cached = relatedCache[vid].list.filter(function(s) {
+          return s && s.id !== cur.id && videoId(s) !== vid;
+        });
+        if (cached.length) {
+          if (window.__pfWarm) window.__pfWarm(cached.slice(0, 3).map(videoId));
+          ok(cached);
+          return;
+        }
+      }
       fetchRelated(cur, function(list) {
         if (list && list.length) {
-          var nextList = list.filter(function(s) { return s.id !== cur.id && s.videoId !== cur.videoId; });
-          if (nextList.length) ok(nextList);
-          else if (fail) fail();
+          var nextList = list.filter(function(s) {
+            return s && s.id !== cur.id && videoId(s) !== vid;
+          });
+          if (nextList.length) {
+            if (window.__pfWarm) window.__pfWarm(nextList.slice(0, 3).map(videoId));
+            ok(nextList);
+          } else if (fail) {
+            fail();
+          }
         } else if (fail) {
           fail();
         }
@@ -199,9 +263,12 @@
       if (!isYt(cur)) return;
       var curId = cur.id || cur.videoId;
       if (topping[curId]) return;
-      var at = (queue || []).findIndex(function(s) { return s.id === cur.id; });
+      var curVid = videoId(cur);
+      var at = (queue || []).findIndex(function(s) {
+        return s && (s.id === cur.id || (curVid && videoId(s) === curVid));
+      });
       var ahead = at < 0 ? 0 : Math.max(0, queue.length - 1 - at);
-      if (ahead >= 10) return;
+      if (ahead >= 8) return;
       topping[curId] = true;
       fetchRelated(cur, function(list) {
         delete topping[curId];
